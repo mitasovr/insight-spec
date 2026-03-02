@@ -1,6 +1,6 @@
 # Connector Reference: Data Sources for Constructor Insight
 
-> Version 2.12 — March 2026
+> Version 2.13 — March 2026
 > Based on: insight-spec PR #3 (Streams Proposal), PR #1 (GitHub/Bitbucket ETL), TASK_TRACKER_ANALYTICS.md (team meetings Jan–Feb 2026)
 
 ---
@@ -8,21 +8,42 @@
 ## How Data Flows
 
 ```
-Source API
+Source APIs (GitHub, Jira, M365, Cursor, BambooHR, ...)
     │
     ▼ Extract via connector
-┌──────────────────────────────────┐
-│  Raw table(s) per source         │  ← source-native schema
-└──────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│  BRONZE — Raw tables per source                 │  {source}_{entity}
+│  github_commits, youtrack_issue_history, ...    │  source-native schema + IDs
+└─────────────────────────────────────────────────┘
+    │                                    │
+    ▼ Unify across sources               ▼ HR connectors also feed
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│  SILVER step 1                │   │  Identity Manager             │
+│  class_{domain}               │   │  (PostgreSQL/MariaDB)         │
+│  unified schema,              │   │  person_id ← email, username, │
+│  source-native user IDs       │   │  employee_id, git login, ...  │
+└───────────────────────────────┘   └───────────────────────────────┘
+    │                                    │
+    ▼ Resolve identities (separate job)  │ person_id lookup
+┌─────────────────────────────────────────────────┐
+│  SILVER step 2                                  │  class_{domain}
+│  class_{domain}                                 │  canonical person_id replaces
+│  same table name, identity-resolved rows        │  source-native user IDs
+└─────────────────────────────────────────────────┘
     │
-    ▼ Normalize + unify
-┌──────────────────────────────────┐
-│  Unified stream table (class)    │  ← one table per class, all sources
-└──────────────────────────────────┘
-    │
-    ▼
-Silver → Gold
+    ▼ Aggregate + derive (per-client config)
+┌─────────────────────────────────────────────────┐
+│  GOLD — Derived metrics                         │  domain-specific names
+│  status_periods, throughput, wip_snapshots, ... │  no raw events
+└─────────────────────────────────────────────────┘
 ```
+
+**Naming convention:**
+- Bronze: `{source}_{entity}` — e.g. `github_commits`, `youtrack_issue_history`
+- Silver: `class_{domain}` — e.g. `class_commits`, `class_task_tracker`, `class_communication_events`
+- Gold: domain-specific derived names — e.g. `status_periods`, `throughput`
+
+Silver step 1 and step 2 share the same `class_` prefix — both represent unified, cross-source data. Step 2 adds canonical `person_id` via a separate identity resolution job.
 
 ---
 
@@ -453,7 +474,7 @@ Every state transition, reassignment, and field update is a separate row. Jira's
 | `cop_onenote_count`                   | numeric | Copilot in OneNote actions |
 | `cop_loop_count`                      | numeric | Copilot in Loop actions |
 
-**What feeds downstream:** Email and Teams fields → `communication_events`. OneDrive, SharePoint, and M365 Copilot fields are collected but not yet mapped to a unified stream — available for future use without re-fetching.
+**What feeds downstream:** Email and Teams fields → `class_communication_events` (Silver step 1). OneDrive, SharePoint, and M365 Copilot fields are collected but not yet mapped to a unified stream — available for future use without re-fetching.
 
 ---
 
@@ -609,11 +630,15 @@ Token fields are nullable — not all events have token-level detail.
 
 ---
 
-## Unified Stream 1: `communication_events`
+## Unified Stream 1: `class_communication_events`
 
 **Sources:** `m365_raw` (Email + Teams fields) + `zulip_messages`
 
 One row per user per day per channel type. OneDrive and SharePoint fields from `m365_raw` are not included — the stream covers only communication activity.
+
+**Two-step Silver pipeline** — same pattern as task tracker:
+- **Step 1:** Unify M365 + Zulip (+ future: Slack) into a single schema; `user_email` as identity key.
+- **Step 2:** Separate identity resolution job replaces `user_email` with canonical `person_id` from Identity Manager. Required for cross-domain joins (communication + commits + tasks via single `person_id`).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -621,7 +646,8 @@ One row per user per day per channel type. OneDrive and SharePoint fields from `
 | `source_id` | text | Composite key tracing to source record: `{source}:{id}:{channel}` |
 | `event_date` | date | Date the communication occurred |
 | `source` | text | `ms365_teams`, `ms365_email`, `zulip` |
-| `user_email` | text | Lowercase email — unified identity key |
+| `user_email` | text | Lowercase email — populated in step 1, retained for traceability |
+| `person_id` | text | Canonical person_id from Identity Manager — populated in step 2 (NULL until resolved) |
 | `user_display_name` | text | Display name (where available) |
 | `channel` | text | Communication channel type |
 | `direction` | text | `outbound`, `inbound`, `engagement` |
@@ -651,11 +677,11 @@ One row per user per day per channel type. OneDrive and SharePoint fields from `
 
 **Sources:** YouTrack + Jira
 
-Two-step Silver pipeline. The connector writes `task_tracker_activities` and `task_tracker_snapshot` simultaneously during data collection. `class_task_tracker` is built on top as the final Silver contract after identity resolution.
+Two-step Silver pipeline. The connector writes `class_task_tracker_activities` and `class_task_tracker_snapshot` simultaneously during data collection. `class_task_tracker` is built on top as the final Silver contract after identity resolution.
 
 ---
 
-### Silver Step 1: `task_tracker_activities` — Unified event stream
+### Silver Step 1: `class_task_tracker_activities` — Unified event stream
 
 Append-only event log built from Bronze changelogs. Each row = one field-change event + full snapshot of universal fields at that moment.
 
@@ -704,15 +730,15 @@ Gold layer extracts needed fields from `fields_map` via client configuration —
 
 ---
 
-### Silver Step 1 (parallel): `task_tracker_snapshot` — Current state (upsert)
+### Silver Step 1 (parallel): `class_task_tracker_snapshot` — Current state (upsert)
 
-Same schema as `task_tracker_activities`, but:
+Same schema as `class_task_tracker_activities`, but:
 
 - **Unique key**: `(source_instance_id, issue_ref)` — one row per issue
 - **Engine**: ReplacingMergeTree by `_version`
 - **Not append-only**: updated on every change
 
-Written by the connector simultaneously with `task_tracker_activities`. The snapshot is never reconstructed post-factum from activity history — that would require replaying the full event tree.
+Written by the connector simultaneously with `class_task_tracker_activities`. The snapshot is never reconstructed post-factum from activity history — that would require replaying the full event tree.
 
 Enables instant current-state queries without full-table scans: "how many issues are open for person X", "what is in the roadmap right now", "how many bugs opened after yesterday's release".
 
@@ -1491,10 +1517,42 @@ No `cost_cents` — flat subscription.
 
 | Stream / Silver Table | Sources | Purpose |
 |----------------------|---------|---------|
-| `communication_events` | M365 (Email + Teams) + Zulip | Cross-platform communication load |
-| `task_tracker_activities` | YouTrack + Jira | Silver step 1 — unified append-only event stream, source-native IDs |
-| `task_tracker_snapshot` | YouTrack + Jira | Silver step 1 (parallel) — current state per issue, upsert |
+| `class_communication_events` | M365 (Email + Teams) + Zulip | Cross-platform communication load |
+| `class_task_tracker_activities` | YouTrack + Jira | Silver step 1 — unified append-only event stream, source-native IDs |
+| `class_task_tracker_snapshot` | YouTrack + Jira | Silver step 1 (parallel) — current state per issue, upsert |
 | `class_task_tracker` | YouTrack + Jira | Silver step 2 — identity-resolved event stream; canonical `person_id` |
+
+---
+
+---
+
+## Open Questions
+
+The following architectural decisions are unresolved and require team alignment before implementation.
+
+### OQ-1: Git deduplication across sources
+
+A company may mirror the same repository from GitHub to Bitbucket (or GitLab). The same `commit_hash` will arrive from two separate Bronze sources.
+
+- Does `class_commits` deduplicate by `commit_hash` globally, regardless of source?
+- If yes: which source wins when metadata differs (e.g. author email present in one, absent in another)?
+- If no: both rows exist in Silver with different `source` values — aggregations must `COUNT(DISTINCT commit_hash)`.
+
+### OQ-2: Identity re-resolution strategy
+
+When Identity Manager merges two previously separate `person_id` values (or splits one), Silver step 2 tables (`class_task_tracker`, `class_communication_events`, `class_commits`, ...) become stale.
+
+- Does the identity resolution job do a full rewrite of affected Silver rows on each run?
+- Or does Identity Manager maintain a version/history so Gold can query point-in-time person assignments?
+- What is the acceptable lag between an identity change and Gold reflecting it?
+
+### OQ-3: AI API tools — per-key user attribution
+
+`claude_api_daily_usage` and `openai_api_daily_usage` aggregate by `api_key_id`, not by person. Per-request user attribution requires the caller to pass `X-Anthropic-User-Id` / `user` field — optional conventions, not enforced.
+
+- Should `class_ai_api_usage` carry a nullable `person_id` (resolved only when the header is present)?
+- Or is per-key usage tracked separately from per-person IDE tool usage (`class_ai_dev_usage`), with no attempt to unify them at Silver?
+- How does cost attribution work when one API key is shared across a team?
 
 ---
 
