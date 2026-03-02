@@ -1,7 +1,7 @@
 # Connector Reference: Data Sources for Constructor Insight
 
-> Version 2.11 — February 2026
-> Based on: insight-spec PR #3 (Streams Proposal), PR #1 (GitHub/Bitbucket ETL)
+> Version 2.12 — March 2026
+> Based on: insight-spec PR #3 (Streams Proposal), PR #1 (GitHub/Bitbucket ETL), TASK_TRACKER_ANALYTICS.md (team meetings Jan–Feb 2026)
 
 ---
 
@@ -281,6 +281,7 @@ Monitoring table — not an analytics source.
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `source_instance_id` | text | Connector instance identifier, e.g. `youtrack-acme-prod` |
 | `youtrack_id` | text | YouTrack internal ID, e.g. `2-12345` |
 | `id_readable` | text | Human-readable ID, e.g. `MON-123` |
 | `created` | timestamp | Issue creation timestamp |
@@ -333,6 +334,7 @@ Every state transition, reassignment, and field update is a separate row.
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `source_instance_id` | text | Connector instance identifier, e.g. `jira-team-alpha` |
 | `jira_id` | text | Jira internal numeric ID, e.g. `10001` |
 | `id_readable` | text | Human-readable key, e.g. `PROJ-123` |
 | `project_key` | text | Project key, e.g. `PROJ` |
@@ -645,30 +647,139 @@ One row per user per day per channel type. OneDrive and SharePoint fields from `
 
 ---
 
-## Unified Stream 2: `class_task_tracker`
+## Unified Stream 2: Task Tracker (Silver → Gold)
 
 **Sources:** YouTrack + Jira
 
-Reconstructs task lifecycle from field change history. One row per task, capturing key timestamps for each workflow phase.
+Two-step Silver pipeline. The connector writes `task_tracker_activities` and `task_tracker_snapshot` simultaneously during data collection. `class_task_tracker` is built on top as the final Silver contract after identity resolution.
+
+---
+
+### Silver Step 1: `task_tracker_activities` — Unified event stream
+
+Append-only event log built from Bronze changelogs. Each row = one field-change event + full snapshot of universal fields at that moment.
+
+**Key principles:**
+- Only universal fields as columns — fields guaranteed to exist in any task tracker for any client. Everything optional goes into `fields_map`.
+- No text values in rows — only refs and numbers. Text values (`"In Progress"`, `"Bug"`) live in ClickHouse Dictionaries (`status_dict`, `type_dict`). Critical for table size at scale.
+- Status and type are not normalised — each client and project has its own names. Interpretation (which status counts as "in_progress") is the responsibility of the Gold layer via configuration.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `task_id` | text | Human-readable ID, e.g. `MON-123` |
-| `task_id_ref` | text | Source system internal ID |
-| `source` | text | `youtrack` or `jira` |
-| `created_at` | timestamp | Task creation |
-| `created_by_name` / `created_by_id` | text | Who created |
-| `started_at` | timestamp | When work began (NULL if not started) |
-| `started_by_name` / `started_by_id` | text | Who started |
-| `testing_started_at` | timestamp | When testing began (NULL if skipped) |
-| `testing_started_by_name` / `testing_started_by_id` | text | Who moved to testing |
-| `done_at` | timestamp | When completed (NULL if open) |
-| `done_by_name` / `done_by_id` | text | Who completed |
-| `ingestion_at` | timestamp | Ingestion timestamp — for incremental sync |
-| `deleted` | boolean | Soft delete flag |
-| `metadata` | jsonb | Source-specific fields |
+| `id` | UInt64 | Unique event identifier |
+| `source` | String | `youtrack` / `jira` / `github` |
+| `source_instance_id` | String | Connector instance, e.g. `youtrack-acme-prod`, `jira-team-alpha` |
+| `activity_ref` | String | Source activity ID — deduplication + link back to Bronze |
+| `task_id` | String | Human-readable ID, e.g. `MON-123`, `PROJ-42` |
+| `issue_ref` | String | Internal tracker ID |
+| `event_date` | Date | Event date |
+| `event_author_raw` | UInt64 | Author ID in source system (numeric, not text) |
+| `assignee_raw` | UInt64 NULL | Assignee ID in source system (numeric, not text) |
+| `type_ref` | UInt32 | Issue type ID → `type_dict` dictionary |
+| `state_ref` | UInt32 | Status ID → `status_dict` dictionary |
+| `changed_field` | String NULL | Which field changed in this event (`status`, `assignee`, ...) |
+| `changed_from` | String NULL | Previous value (ref/id, not text) |
+| `changed_to` | String NULL | New value (ref/id, not text) |
+| `created_date` | Date | When the issue was created |
+| `done_date` | Date NULL | Last transition to a final status |
+| `parent_issue_ref` | String NULL | Parent issue ID (single parent — enforced by automation) |
+| `title_version` | UInt32 | Title change counter |
+| `description_version` | UInt32 | Description change counter |
+| `fields_map` | Map(String, String) | Whitelisted extra fields per `source_instance_id`; values are IDs/numbers, not text |
+| `collected_at` | DateTime64(3) | Collection timestamp |
+| `_version` | UInt64 | ReplacingMergeTree version |
 
-Tasks link to git commits via `task_id = git_commits.message` (extracted ticket pattern).
+**`fields_map` examples** (whitelist configured per `source_instance_id`):
+
+| Key | Example value | Universal? |
+|-----|---------------|-----------|
+| `sprint` | `"42"` (sprint ID) | No — Scrum only |
+| `priority` | `"3"` (priority ID) | Most teams |
+| `story_points` | `"5"` | No — estimation teams only |
+| `reporter` | `"1234"` (user ID) | Most teams |
+| `fix_version` | `"101"` (version ID) | No |
+| `labels` | `"5,12"` (label IDs) | Partial |
+
+Gold layer extracts needed fields from `fields_map` via client configuration — not hardcoded columns.
+
+---
+
+### Silver Step 1 (parallel): `task_tracker_snapshot` — Current state (upsert)
+
+Same schema as `task_tracker_activities`, but:
+
+- **Unique key**: `(source_instance_id, issue_ref)` — one row per issue
+- **Engine**: ReplacingMergeTree by `_version`
+- **Not append-only**: updated on every change
+
+Written by the connector simultaneously with `task_tracker_activities`. The snapshot is never reconstructed post-factum from activity history — that would require replaying the full event tree.
+
+Enables instant current-state queries without full-table scans: "how many issues are open for person X", "what is in the roadmap right now", "how many bugs opened after yesterday's release".
+
+---
+
+### Silver Step 2: `class_task_tracker` — Identity resolution + final Silver contract
+
+Replaces source-specific identifiers (`author_youtrack_id`, `author_account_id`) with canonical `person_id` from Identity Manager. Enables joining tasks with git commits, communications, and HR data via a single unified identifier.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_id` | String | Human-readable ID, e.g. `MON-123`, `PROJ-42` |
+| `issue_ref` | String | Internal tracker ID |
+| `source` | String | `youtrack` / `jira` / `github` |
+| `source_instance_id` | String | Connector instance identifier |
+| `type` | String | Issue type (not normalised — stored as-is) |
+| `state` | String | Current status (not normalised — stored as-is) |
+| `event_date` | Date | Event date |
+| `event_author_person_id` | String | Canonical person_id from Identity Manager — who made the transition |
+| `assignee_person_id` | String NULL | Canonical person_id — who is assigned at this moment |
+| `changed_field` | String NULL | Which field changed (`status`, `assignee`, ...) |
+| `changed_from` | String NULL | Previous value |
+| `changed_to` | String NULL | New value |
+| `parent_issue_ref` | String NULL | Parent issue for hierarchy |
+| `created_date` | Date | Issue creation date |
+| `done_date` | Date NULL | Last transition to a final status |
+| `title_version` | UInt32 | Title change counter |
+| `description_version` | UInt32 | Description change counter |
+| `fields_map` | Map(String, String) | Whitelisted extra fields |
+| `ingestion_at` | DateTime64(3) | Ingestion timestamp — for incremental downstream sync |
+| `deleted` | Boolean | Soft delete flag |
+| `_version` | UInt64 | ReplacingMergeTree version |
+
+**Three distinct "who" fields — critical distinction:**
+
+| Field | Who | Example |
+|-------|-----|---------|
+| `event_author_person_id` | Who made the state transition | QA engineer who moved the issue to Done |
+| `assignee_person_id` | Who is assigned to the issue at this moment | Developer who implemented the feature |
+| `fields_map['reporter']` | Who created the issue | QA who filed the bug |
+
+Tasks link to git commits via `task_id` matched against commit messages (extracted ticket pattern).
+
+---
+
+### Gold: Derived metrics (built on top of `class_task_tracker`)
+
+Gold does not store raw events — only computed metrics. Requires per-`source_instance_id` status category configuration:
+
+```yaml
+source_instance_id: jira-acme-prod
+status_categories:
+  in_progress: ["In Progress", "In Development", "В работе"]
+  testing:     ["In Review", "To Verify", "QA"]
+  done:        ["Done", "Closed", "Resolved"]
+sprint_field:       "sprint"         # key in fields_map
+story_points_field: "story_points"   # key in fields_map
+```
+
+| Gold Table | Description |
+|------------|-------------|
+| `status_periods` | `(task_id, status, entered_at, exited_at)` — cycle time per state |
+| `lifecycle_summary` | `created_at → started_at → testing_started_at → done_at` — lead time |
+| `throughput` | COUNT(done) per week / sprint — delivery rate |
+| `wip_snapshots` | Issues per status per day — CFD, bottleneck analysis |
+
+From `status_periods`: cycle time = `exited_at - entered_at` per status; lead time = first `in_progress` to `done`; WIP = `WHERE entered_at < now AND exited_at IS NULL`; throughput = `COUNT(done)` per week.
 
 ---
 
@@ -1360,8 +1471,8 @@ No `cost_cents` — flat subscription.
 | **GitHub** | `github_repositories`, `github_branches`, `github_commits`, `github_commit_files`, `github_pull_requests`, `github_pull_request_reviews`, `github_pull_request_comments`, `github_pull_request_commits`, `github_ticket_refs`, `github_collection_runs` | REST v3 + GraphQL v4; formal review states |
 | **Bitbucket** | `bitbucket_repositories`, `bitbucket_branches`, `bitbucket_commits`, `bitbucket_commit_files`, `bitbucket_pull_requests`, `bitbucket_pull_request_reviewers`, `bitbucket_pull_request_comments`, `bitbucket_pull_request_commits`, `bitbucket_ticket_refs`, `bitbucket_collection_runs` | REST v1/v2; uuid identity; comment severity field |
 | **GitLab** | same structure with `gitlab_` prefix + `gitlab_num_stat`, `gitlab_files`, `gitlab_mr_approvals` | Merge Requests; effective-dated file stats; approval model |
-| **YouTrack** | `youtrack_issue`, `youtrack_issue_history`, `youtrack_user` | Full field change history |
-| **Jira** | `jira_issue`, `jira_issue_history`, `jira_user` | Same model as YouTrack; changelog has explicit from/to values |
+| **YouTrack** | `youtrack_issue`, `youtrack_issue_history`, `youtrack_user` | Full field change history; `source_instance_id` in issue table |
+| **Jira** | `jira_issue`, `jira_issue_history`, `jira_user` | Same model as YouTrack; changelog has explicit from/to values; `source_instance_id` in issue table |
 | **M365** | `m365_raw` (one wide table) | 5 API endpoints joined by `user_principal_name + report_refresh_date`; incl. M365 Copilot (`cop_` prefix) |
 | **Zulip** | `zulip_messages`, `zulip_users` | Aggregated counts, no message content |
 | **Cursor** | `cursor_daily_usage`, `cursor_events`, `cursor_events_token_usage` | Daily aggregates + per-event detail |
@@ -1378,11 +1489,13 @@ No `cost_cents` — flat subscription.
 | **ChatGPT Team** | `chatgpt_team_seats`, `chatgpt_team_activity` | Per-seat subscription; web + desktop + mobile |
 | **Allure TestOps** | `allure_launches`, `allure_test_results`, `allure_defects` | Test runs + per-test results + defects linked to external tickets |
 
-| Stream Table | Sources | Purpose |
-|-------------|---------|---------|
+| Stream / Silver Table | Sources | Purpose |
+|----------------------|---------|---------|
 | `communication_events` | M365 (Email + Teams) + Zulip | Cross-platform communication load |
-| `class_task_tracker` | YouTrack + Jira | Delivery metrics, cycle time |
+| `task_tracker_activities` | YouTrack + Jira | Silver step 1 — unified append-only event stream, source-native IDs |
+| `task_tracker_snapshot` | YouTrack + Jira | Silver step 1 (parallel) — current state per issue, upsert |
+| `class_task_tracker` | YouTrack + Jira | Silver step 2 — identity-resolved event stream; canonical `person_id` |
 
 ---
 
-*Based on insight-spec repository, Streams Proposal (PR #3) and GitHub/Bitbucket ETL Design (PR #1), February 2026. Jira raw table schema designed by analogy with YouTrack (same three-table model, Jira API field names).*
+*Based on insight-spec repository, Streams Proposal (PR #3) and GitHub/Bitbucket ETL Design (PR #1), February 2026. Jira raw table schema designed by analogy with YouTrack (same three-table model, Jira API field names). Task Tracker Silver/Gold architecture updated March 2026 per team meeting notes and TASK_TRACKER_ANALYTICS.md research.*
