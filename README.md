@@ -1,4 +1,4 @@
-# Insight — Specification Repository
+# Insight
 
 > Decision Intelligence Platform
 
@@ -8,6 +8,8 @@ This repository contains the full product specification for **Insight** — an e
 
 - [What Is Insight](#what-is-insight)
 - [Architecture Overview](#architecture-overview)
+  - [Components](#components)
+  - [Bronze → Silver → Gold pipeline](#bronze--silver--gold-pipeline)
 - [Repository Structure](#repository-structure)
   - [docs/](#docs)
   - [inbox/](#inbox)
@@ -41,26 +43,47 @@ Insight is **not** a replacement for source systems — it reads from them, reso
 
 ## Architecture Overview
 
-The platform has two independent layers:
+The solution consists of five main components:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Analytics Layer                         │
-│   Dashboards · AI-powered exploration · Semantic governance  │
-└────────────────────────┬────────────────────────────────────┘
-                         │ data API
-┌────────────────────────▼────────────────────────────────────┐
-│                       Metrics Layer                          │
-│                                                              │
-│  Connectors → Bronze → Silver → Gold                         │
-│                          ↑                                   │
-│               Identity Resolution                            │
-└──────────────────────────────────────────────────────────────┘
-         ↑           ↑           ↑           ↑
-      Git/VCS   Task Tracker  Comms/M365   AI Tools  ...
+┌──────────────────────────────────────────────────────────────────┐
+│                          Frontend (SPA)                           │
+│  Dashboards · Analytics · AI adoption · PR metrics · Team health  │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ REST API (auth + data)
+┌────────────────────────────▼─────────────────────────────────────┐
+│                    Backend (REST API Server)                       │
+│        Authentication · Authorization · User Management           │
+│                     Data Proxy to Database                        │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ query
+┌────────────────────────────▼─────────────────────────────────────┐
+│                    Database (Analytics Store)                      │
+│             Bronze → Silver → Gold (identity-resolved)            │
+└────────────────────────────▲─────────────────────────────────────┘
+                             │ write
+┌────────────────────────────┴─────────────────────────────────────┐
+│              Connector Orchestration Layer                        │
+│         Scheduling · Retry · State management · Monitoring        │
+└────────────────────────────▲─────────────────────────────────────┘
+                             │ collect
+┌────────────────────────────┴─────────────────────────────────────┐
+│                         Connectors                                │
+│   Git · Task Tracking · Collaboration · AI Tools · HR · CRM ...  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-**Bronze → Silver → Gold pipeline:**
+### Components
+
+| # | Component | Description |
+|---|-----------|-------------|
+| 1 | **Connectors** | Source-specific integrations that pull raw data from external tools (git, task trackers, AI tools, HR systems, etc.) and write it to Bronze tables in the analytics database. |
+| 2 | **Connector Orchestration** | Scheduling, retry, state management, and monitoring layer that coordinates connector runs and ensures reliable data ingestion. |
+| 3 | **Database** | Analytics store holding the Bronze → Silver → Gold pipeline. Bronze is raw source data; Silver unifies schemas and resolves identities; Gold contains aggregated business metrics. |
+| 4 | **Backend** | REST API server providing authentication, authorization, user management, and data proxy services. Serves as the central authentication gateway and data access layer, integrating with enterprise SSO systems. |
+| 5 | **Frontend** | Single-page application (SPA) providing engineering managers, team leads, and developers with analytics and visualizations of git activity, AI tool adoption, pull request metrics, and team productivity. |
+
+### Bronze → Silver → Gold pipeline
 
 - **Bronze** — Raw, source-faithful tables. Field names and types preserved from the API. One table per entity type per source.
 - **Silver Step 1** — Source tables unified into common schemas (e.g. `collab_chat_activity` merges Slack + Zulip + M365 Teams).
@@ -103,10 +126,10 @@ docs/
 ├── connectors_orchestration/     ← connector orchestration layer specs
 │   └── specs/ (PRD, DESIGN, ADR)
 │
-├── backend/                      ← backend service specs
+├── backend/                      ← REST API server: auth, authorization, user management, data proxy
 │   └── specs/ (PRD, DESIGN, ADR)
 │
-└── frontend/                     ← frontend / UI specs
+└── frontend/                     ← SPA: analytics dashboards, git activity, AI adoption, PR metrics
     └── specs/ (PRD, DESIGN, ADR)
 ```
 
@@ -193,7 +216,9 @@ Business requirements, use cases, actor definitions, and functional/non-function
 
 `specs/DESIGN.md` is the authoritative technical specification for a component. It must reflect the current agreed-upon design at all times.
 
-**Do not edit `DESIGN.md` directly to propose a change.** Instead:
+**Minor changes** (style fixes, formatting, clarifications, small field additions) can be committed directly to `specs/DESIGN.md` via a standard PR.
+
+**Major changes** (data schema changes, new pipeline stages, significant architectural decisions, breaking changes to existing models) require an ADR first:
 
 1. Create a new ADR in `specs/ADR/` describing the proposed change (context, options considered, decision, consequences).
 2. Open a PR with the ADR only.
@@ -204,14 +229,15 @@ This ensures every significant design change has a traceable decision record bef
 #### ADR naming convention
 
 ```
-specs/ADR/ADR-NNN-short-description.md
+specs/ADR/NNN-short-description.md
 ```
 
-Example: `specs/ADR/ADR-001-use-email-as-identity-key.md`
+Example: `specs/ADR/001-use-email-as-identity-key.md`
 
 ### Summary
 
 ```
-Propose requirement change  →  edit PRD.md  →  PR  →  merge
-Propose design change       →  new ADR      →  PR  →  merge  →  update DESIGN.md
+Propose requirement change       →  edit PRD.md       →  PR  →  merge
+Propose minor design change      →  edit DESIGN.md    →  PR  →  merge
+Propose major design change      →  new ADR           →  PR  →  merge  →  update DESIGN.md
 ```
