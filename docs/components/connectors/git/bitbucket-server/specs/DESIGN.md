@@ -606,14 +606,18 @@ INSERT INTO bitbucket_api_cache (
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier (e.g. `bitbucket-acme-prod`) |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner — joins to `git_commit_files.project_key` |
 | `repo_slug` | String | REQUIRED | Repository name — joins to `git_commit_files.repo_slug` |
 | `commit_hash` | String | REQUIRED | Commit SHA — joins to `git_commit_files.commit_hash` |
 | `file_path` | String | REQUIRED | File path — joins to `git_commit_files.file_path` |
-| `property_key` | String | REQUIRED | Property name (e.g., `ai_thirdparty_flag`, `scancode_thirdparty_flag`, `scancode_metadata`) |
-| `property_value` | String | REQUIRED | Property value (stored as string, can be JSON for complex values) |
-| `property_type` | String | REQUIRED | Value type hint: `string`, `number`, `boolean`, `json` |
+| `field_id` | String | REQUIRED | Machine identifier for the property (e.g. `ai_thirdparty_flag`, `scancode_metadata`) |
+| `field_name` | String | REQUIRED | Human-readable label for the property (e.g. `"AI Third-party Flag"`) |
+| `field_value_str` | String | NULLABLE | String / JSON value; NULL when the property is purely numeric |
+| `field_value_int` | Int64 | NULLABLE | Integer or boolean (0/1) value; NULL when the property is not an integer |
+| `field_value_float` | Float64 | NULLABLE | Fractional numeric value; NULL when the property is not a float |
 | `collected_at` | DateTime64(3) | REQUIRED | When this property was collected/computed |
 | `data_source` | String | DEFAULT '' | Source discriminator — always `'insight_bitbucket_server'` for this connector |
 | `_version` | UInt64 | REQUIRED | Deduplication version (Unix ms) |
@@ -621,15 +625,15 @@ INSERT INTO bitbucket_api_cache (
 **PK**: `id`
 
 **Indexes**:
-- `idx_commit_file_ext_lookup`: `(project_key, repo_slug, commit_hash, file_path, property_key, data_source)`
-- `idx_file_property_key`: `(property_key)`
+- `idx_commit_file_ext_lookup`: `(tenant_id, source_instance_id, project_key, repo_slug, commit_hash, file_path, field_id, data_source)`
+- `idx_file_ext_field_id`: `(field_id)`
 
 **Populated by**: AI detection pipeline and ScanCode pipeline (separate from the Bitbucket connector). The connector itself does not populate this table; it is enriched post-collection.
 
 **Common property keys**:
-- `ai_thirdparty_flag` — AI-detected third-party code (0 or 1) — type: `boolean`
-- `scancode_thirdparty_flag` — License scanner detected third-party (0 or 1) — type: `boolean`
-- `scancode_metadata` — License and copyright scanning results for this file — type: `json`
+- `ai_thirdparty_flag` — AI-detected third-party code (0 or 1) — value: `field_value_int`
+- `scancode_thirdparty_flag` — License scanner detected third-party (0 or 1) — value: `field_value_int`
+- `scancode_metadata` — License and copyright scanning results for this file — value: `field_value_str` (JSON)
 
 **Schema reference**: `docs/components/connectors/git/README.md` → `git_commits_files_ext`
 
@@ -722,6 +726,8 @@ def paginate_endpoint(api_client, endpoint, **params):
 
 ```python
 {
+    'tenant_id': config.tenant_id,
+    'source_instance_id': config.source_instance_id,
     'project_key': api_data['project']['key'],
     'repo_slug': api_data['slug'],
     'repo_uuid': str(api_data.get('id')) or None,
@@ -744,6 +750,8 @@ def paginate_endpoint(api_client, endpoint, **params):
 
 ```python
 {
+    'tenant_id': config.tenant_id,
+    'source_instance_id': config.source_instance_id,
     'project_key': project_key,
     'repo_slug': repo_slug,
     'commit_hash': api_data['id'],                       # Full SHA-1 (40 chars)
@@ -770,6 +778,8 @@ def paginate_endpoint(api_client, endpoint, **params):
 
 ```python
 {
+    'tenant_id': config.tenant_id,
+    'source_instance_id': config.source_instance_id,
     'project_key': project_key,
     'repo_slug': repo_slug,
     'commit_hash': commit_hash,
@@ -790,6 +800,8 @@ def paginate_endpoint(api_client, endpoint, **params):
 
 ```python
 {
+    'tenant_id': config.tenant_id,
+    'source_instance_id': config.source_instance_id,
     'project_key': project_key,
     'repo_slug': repo_slug,
     'pr_id': api_data['id'],
@@ -824,6 +836,8 @@ def paginate_endpoint(api_client, endpoint, **params):
 
 ```python
 {
+    'tenant_id': config.tenant_id,
+    'source_instance_id': config.source_instance_id,
     'project_key': project_key, 'repo_slug': repo_slug, 'pr_id': pr_id,
     'reviewer_name': user_data['name'],
     'reviewer_uuid': str(user_data['id']),
@@ -843,6 +857,8 @@ def paginate_endpoint(api_client, endpoint, **params):
 
 ```python
 {
+    'tenant_id': config.tenant_id,
+    'source_instance_id': config.source_instance_id,
     'project_key': project_key, 'repo_slug': repo_slug, 'pr_id': pr_id,
     'comment_id': comment_data['id'],
     'content': comment_data['text'],
@@ -873,7 +889,8 @@ def paginate_endpoint(api_client, endpoint, **params):
 ```sql
 SELECT branch_name, last_commit_hash, last_commit_date
 FROM git_repository_branches
-WHERE project_key = 'MYPROJ' AND repo_slug = 'my-repo'
+WHERE tenant_id = '<tenant_id>'
+  AND project_key = 'MYPROJ' AND repo_slug = 'my-repo'
   AND data_source = 'insight_bitbucket_server';
 ```
 
@@ -882,7 +899,8 @@ WHERE project_key = 'MYPROJ' AND repo_slug = 'my-repo'
 ```sql
 SELECT MAX(updated_on) AS last_update
 FROM git_pull_requests
-WHERE project_key = 'MYPROJ' AND repo_slug = 'my-repo'
+WHERE tenant_id = '<tenant_id>'
+  AND project_key = 'MYPROJ' AND repo_slug = 'my-repo'
   AND data_source = 'insight_bitbucket_server';
 ```
 
