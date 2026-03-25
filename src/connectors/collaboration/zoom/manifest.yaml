@@ -392,25 +392,20 @@ definitions:
                 record.get('channel_id', '') ~ ':' ~ record.get('count', '1')) }}
             - type: AddedFieldDefinition
               path:
-                - linked_meeting_series_id
-              value: "{{ record.get('meeting_id') }}"
+                - channel_type
+              value: "{{ record.get('channel_type') or 'direct' }}"
             - type: AddedFieldDefinition
               path:
-                - linked_meeting_occurrence_id
-              value: "{{ record.get('occurrence_id') }}"
+                - activity_date
+              value: "{{ record.get('date') or record.get('message_time') or record.get('timestamp') }}"
             - type: AddedFieldDefinition
               path:
-                - linked_meeting_uuid
-              value: "{{ record.get('meeting_uuid') or record.get('uuid') }}"
+                - message_count
+              value: "{{ record.get('count') or 1 }}"
             - type: AddedFieldDefinition
               path:
-                - linked_meeting_instance_key
-              value: >-
-                {{ ('zoom:uuid:' ~ (record.get('meeting_uuid') or
-                record.get('uuid'))|lower) if (record.get('meeting_uuid') or
-                record.get('uuid')) else (('zoom:occurrence:' ~ record.get('meeting_id')
-                ~ ':' ~ record.get('occurrence_id')) if (record.get('meeting_id') and
-                record.get('occurrence_id')) else none) }}
+                - source_endpoint
+              value: chat/users/{userId}/messages
         - type: AddFields
           fields:
             - type: AddedFieldDefinition
@@ -701,22 +696,6 @@ schemas:
           - string
           - "null"
       collection_mode:
-        type:
-          - string
-          - "null"
-      linked_meeting_instance_key:
-        type:
-          - string
-          - "null"
-      linked_meeting_series_id:
-        type:
-          - string
-          - "null"
-      linked_meeting_occurrence_id:
-        type:
-          - string
-          - "null"
-      linked_meeting_uuid:
         type:
           - string
           - "null"

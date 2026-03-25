@@ -368,7 +368,7 @@ None.
 
 **Compatibility**: The connector depends on continued availability of the required Zoom activity surfaces; source-side entitlement or contract changes may reduce completeness until the connector is updated
 
-**Implementation note**: The current declarative connector manifest uses concise stream names `users`, `meetings`, `participants`, and `message_activities`. These implementation stream names do not change the Zoom Bronze table model defined in this PRD.
+**Implementation note**: The current declarative connector manifest uses concise stream names `users`, `meetings`, `participants`, and `message_activities`. Message activity is implemented through a separate user-scoped message stream. These implementation stream names do not change the Zoom Bronze table model defined in this PRD.
 
 ## 8. Use Cases
 

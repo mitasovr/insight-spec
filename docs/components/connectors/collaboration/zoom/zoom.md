@@ -38,9 +38,9 @@ Standalone specification for the Zoom (Collaboration) connector. This document a
 
 **Authentication**: OAuth 2.0 — Server-to-Server OAuth app using `account_id`, `client_id`, and `client_secret`. JWT is deprecated as of 2023 and must not be used for new integrations.
 
-**Required OAuth scopes**: must cover `GET /users`, `GET /metrics/meetings`, `GET /metrics/meetings/{meeting_uuid}/participants`, and `GET /chat/users/{zoom_user_id}/messages` for the connector's implemented collection paths.
+**Required OAuth scopes**: must cover `GET /users`, `GET /metrics/meetings`, `GET /metrics/meetings/{meeting_uuid}/participants`, and `GET /chat/users/{zoom_user_id}/messages` for the connector's implemented collection paths. In practice this means the configured Zoom app must include the required Team Chat read scopes, including the message-listing scopes surfaced by Zoom when testing the message endpoints.
 
-**Pagination**: `users`, `meetings`, `participants`, and `message_activities` all use Zoom `next_page_token` pagination where the endpoint supports it. The meeting-related streams request `page_size` explicitly in the current manifest.
+**Pagination**: `users`, `meetings`, `participants`, and `message_activities` all use Zoom `next_page_token` pagination where the endpoint supports it. The meeting-related and message-related streams request `page_size` explicitly in the current manifest.
 
 **Field naming**: snake_case — Zoom API returns mixed naming styles; fields are normalised to snake_case at Bronze level.
 
