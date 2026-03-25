@@ -159,6 +159,7 @@ Resolves `email`/`userEmail` from Cursor Bronze tables to canonical `person_id` 
 - Identity resolution via `email` and `userEmail`
 - Bronze-layer table schemas for all 5 streams
 - Connector package descriptor (`descriptor.yaml`) with stream-to-table mappings and Silver targets
+- dbt models for Bronze-to-Silver transformation (`dbt/to_ai_dev_usage.sql` + `schema.yml`)
 
 ### 4.2 Out of Scope
 
@@ -415,6 +416,8 @@ Usage event cost fields (`requestsCosts`, `cursorTokenFee`, `totalCents`) **MUST
 - Pagination is exhausted for all paginated endpoints (no truncated results)
 - Basic authentication works correctly with the team API key
 - `descriptor.yaml` is present, valid, and lists all 5 streams with correct `bronze_table`, `primary_key`, and `cursor_field` values
+- dbt model `to_ai_dev_usage.sql` compiles successfully and produces `class_ai_dev_usage` Silver table with `tenant_id` preserved
+- `tenant_id` is present in every record emitted by the connector (injected via `AddFields` transformation)
 
 ## 10. Dependencies
 

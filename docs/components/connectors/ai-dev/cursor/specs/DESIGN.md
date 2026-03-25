@@ -211,9 +211,11 @@ src/ingestion/connectors/ai-dev/cursor/
 ├── connector.yaml          # Airbyte declarative manifest (nocode)
 ├── descriptor.yaml         # Package metadata: streams, Silver targets
 └── dbt/
-    └── to_ai_dev_usage.sql # dbt model: Bronze → Silver (future)
-    └── schema.yml          # Column documentation + dbt tests (future)
+    ├── to_ai_dev_usage.sql # dbt model: Bronze → Silver (class_ai_dev_usage)
+    └── schema.yml          # Column documentation + dbt tests (tenant_id not_null)
 ```
+
+The dbt model `to_ai_dev_usage.sql` transforms `cursor_daily_usage` and `cursor_usage_events` Bronze tables into the unified `class_ai_dev_usage` Silver table. `tenant_id` MUST be preserved and tested with a `not_null` dbt test. A `source` column SHOULD be set to `'cursor'`.
 
 #### Connector Package Descriptor
 
@@ -281,6 +283,92 @@ Defines the complete Cursor connector as a YAML declarative manifest executed by
 
 Defines all 5 streams with: Cursor API endpoint paths, Basic authentication, page-based pagination (page/pageSize for POST endpoints; page/pageSize query params for GET endpoints), date-range-based incremental sync, and inline JSON schemas.
 
+##### Manifest Skeleton
+
+The manifest follows the Airbyte declarative framework structure (latest stable version). Key structural elements:
+
+```yaml
+version: "<latest>"
+type: DeclarativeSource
+check:
+  type: CheckStream
+  stream_names: [cursor_members]
+
+streams:
+  - type: DeclarativeStream
+    name: cursor_usage_events
+    primary_key: [unique]
+    schema_loader:
+      type: InlineSchemaLoader
+      schema:
+        type: object
+        properties:
+          tenant_id: { type: string }
+          userEmail: { type: string }
+          timestamp: { type: string }
+          # ... remaining fields per §3.7 table schema
+    retriever:
+      type: SimpleRetriever
+      requester:
+        type: HttpRequester
+        url_base: https://api.cursor.com
+        path: /teams/filtered-usage-events
+        http_method: POST
+        authenticator:
+          type: BasicHttpAuthenticator
+          username: "{{ config['api_key'] }}"
+        request_body_json:
+          startDate: "{{ stream_interval.start_time }}"
+          endDate: "{{ stream_interval.end_time }}"
+          page: "{{ next_page_token['next_page_token'] }}"
+          pageSize: 500
+      record_selector:
+        type: RecordSelector
+        extractor:
+          type: DpathExtractor
+          field_path: [usageEvents]
+      paginator:
+        type: DefaultPaginator
+        pagination_strategy:
+          type: PageIncrement
+          page_size: 500
+          start_from_page: 1
+        page_token_option:
+          type: RequestOption
+          inject_into: body_json
+          field_name: page
+    transformations:
+      - type: AddFields
+        fields:
+          - path: [tenant_id]
+            value: "{{ config['tenant_id'] }}"
+          - path: [unique]
+            value: "{{ record['userEmail'] }}{{ record['timestamp'] }}"
+    incremental_sync:
+      type: DatetimeBasedCursor
+      cursor_field: timestamp
+      # ... cursor configuration
+  # ... remaining streams follow same pattern
+
+spec:
+  type: Spec
+  connection_specification:
+    type: object
+    required: [tenant_id, api_key]
+    properties:
+      tenant_id:
+        type: string
+        title: Tenant ID
+        order: 0
+      api_key:
+        type: string
+        title: API Key
+        airbyte_secret: true
+        order: 1
+```
+
+This is a structural skeleton — the full manifest is in `src/ingestion/connectors/ai-dev/cursor/connector.yaml`.
+
 ##### Responsibility boundaries
 
 Does not handle orchestration, scheduling, or state storage. Does not perform Silver/Gold transformations. Does not handle destination-specific configuration. Does not implement dual-schedule sync — that is an orchestrator concern.
@@ -288,6 +376,12 @@ Does not handle orchestration, scheduling, or state storage. Does not perform Si
 ##### Related components (by ID)
 
 - Airbyte Declarative Connector framework (`source-declarative-manifest` image) — executes this manifest
+
+#### tenant_id Injection Component
+
+- [ ] `p1` - **ID**: `cpt-insightspec-component-cursor-tenant-id-injection`
+
+Ensures every record emitted by all streams contains `tenant_id` from the connector config. Implemented as an `AddFields` transformation in the manifest, applied to every stream. See §3.3 Source Config Schema for the injection pattern.
 
 ### 3.3 API Contracts
 
@@ -337,11 +431,41 @@ The source config (credentials) for the Cursor connector:
 
 ```json
 {
+  "tenant_id": "Tenant isolation identifier (UUID)",
   "api_key": "Cursor team API key"
 }
 ```
 
-`api_key` is required and marked `airbyte_secret: true` — it is never logged or displayed.
+Both fields are required. `tenant_id` is a platform invariant — every connector must accept it. `api_key` is marked `airbyte_secret: true` — it is never logged or displayed.
+
+#### tenant_id Injection
+
+Per the ingestion layer tenant isolation principle (see [Ingestion Layer DESIGN](../../../../domain/ingestion/specs/DESIGN.md)), every record emitted by the connector MUST contain `tenant_id`. This is achieved via an `AddFields` transformation in the manifest:
+
+```yaml
+# In spec.connection_specification:
+required: [tenant_id, api_key]
+properties:
+  tenant_id:
+    type: string
+    title: Tenant ID
+    description: Tenant isolation identifier
+    order: 0
+  api_key:
+    type: string
+    title: API Key
+    airbyte_secret: true
+    order: 1
+
+# In each stream's transformations:
+transformations:
+  - type: AddFields
+    fields:
+      - path: [tenant_id]
+        value: "{{ config['tenant_id'] }}"
+```
+
+This transformation is applied to **every stream** in the manifest, ensuring `tenant_id` is present in every record before it reaches the destination.
 
 ### 3.4 Internal Dependencies
 
@@ -446,7 +570,14 @@ sequenceDiagram
 
 ### 3.7 Database schemas & tables
 
-Bronze tables are created by the destination container.
+Bronze tables are created by the Airbyte destination (ClickHouse). In addition to the connector-defined columns listed below, the Airbyte destination automatically adds framework columns to every table:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `_airbyte_raw_id` | String | Airbyte deduplication key — auto-generated |
+| `_airbyte_extracted_at` | DateTime64 | Extraction timestamp — auto-generated |
+
+These columns are not defined in the manifest schema but are present in all Bronze tables at runtime.
 
 #### Table: `cursor_members`
 
