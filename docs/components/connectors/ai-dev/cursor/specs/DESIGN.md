@@ -206,7 +206,7 @@ graph TD
 
 The Cursor connector is packaged as a self-contained unit following the standard connector package layout:
 
-```
+```text
 src/ingestion/connectors/ai-dev/cursor/
 ├── connector.yaml          # Airbyte declarative manifest (nocode)
 ├── descriptor.yaml         # Package metadata: streams, Silver targets
@@ -215,7 +215,7 @@ src/ingestion/connectors/ai-dev/cursor/
     └── schema.yml          # Column documentation + dbt tests (tenant_id not_null)
 ```
 
-The dbt model `to_ai_dev_usage.sql` transforms `cursor_daily_usage` and `cursor_usage_events` Bronze tables into the unified `class_ai_dev_usage` Silver table. `tenant_id` MUST be preserved and tested with a `not_null` dbt test. A `source` column SHOULD be set to `'cursor'`.
+The dbt model `to_ai_dev_usage.sql` transforms `cursor_daily_usage` and `cursor_usage_events` Bronze tables into the unified `class_ai_dev_usage` Silver table. `tenant_id` MUST be preserved and tested with a `not_null` dbt test. The `data_source` column (already present in Bronze tables as `'insight_cursor'`) MUST be carried through to Silver as the canonical source discriminator — no separate `source` column is needed.
 
 #### Connector Package Descriptor
 
@@ -723,13 +723,13 @@ Monitoring table — not an analytics source.
 
 The Cursor connector is deployed as a connection in the Airbyte Declarative Connector framework. No additional infrastructure is required beyond what the framework provides.
 
-```
+```text
 Connection: cursor-{team_name}
 ├── Package: src/ingestion/connectors/ai-dev/cursor/
 │   ├── connector.yaml (declarative manifest)
 │   └── descriptor.yaml (package metadata)
 ├── Source image: airbyte/source-declarative-manifest
-├── Source config: {api_key}
+├── Source config: {tenant_id, api_key}
 ├── Configured catalog: 4 data streams + collection_runs
 ├── Destination image: airbyte/destination-postgres (or other)
 ├── Destination config: {host, port, database, schema, credentials}

@@ -29,6 +29,8 @@
   - [7.1 Public API Surface](#71-public-api-surface)
   - [7.2 External Integration Contracts](#72-external-integration-contracts)
 - [8. Use Cases](#8-use-cases)
+  - [Configure Cursor Connection](#configure-cursor-connection)
+  - [Incremental Sync Run](#incremental-sync-run)
 - [9. Acceptance Criteria](#9-acceptance-criteria)
 - [10. Dependencies](#10-dependencies)
 - [11. Assumptions](#11-assumptions)
@@ -155,9 +157,9 @@ Resolves `email`/`userEmail` from Cursor Bronze tables to canonical `person_id` 
 - Extraction of individual AI usage events from `POST /teams/filtered-usage-events`
 - Extraction of daily aggregated usage from `POST /teams/daily-usage-data`
 - Incremental sync using `timestamp`/`date` as cursors
-- Connector execution monitoring via collection runs stream
+- Connector execution monitoring via `cursor_collection_runs` stream
 - Identity resolution via `email` and `userEmail`
-- Bronze-layer table schemas for all 5 streams
+- Bronze-layer table schemas for all 5 streams (4 data + 1 monitoring: `cursor_collection_runs`)
 - Connector package descriptor (`descriptor.yaml`) with stream-to-table mappings and Silver targets
 - dbt models for Bronze-to-Silver transformation (`dbt/to_ai_dev_usage.sql` + `schema.yml`)
 
@@ -345,7 +347,7 @@ Usage event cost fields (`requestsCosts`, `cursorTokenFee`, `totalCents`) **MUST
 
 ## 8. Use Cases
 
-#### Configure Cursor Connection
+### Configure Cursor Connection
 
 - [ ] `p1` - **ID**: `cpt-insightspec-usecase-cursor-configure`
 
@@ -372,7 +374,7 @@ Usage event cost fields (`requestsCosts`, `cursorTokenFee`, `totalCents`) **MUST
 - **Insufficient plan**: API returns 403; system reports that a Business/Enterprise plan may be required
 - **Rate limited on check**: System retries after 60s; reports success if retry succeeds
 
-#### Incremental Sync Run
+### Incremental Sync Run
 
 - [ ] `p1` - **ID**: `cpt-insightspec-usecase-cursor-incremental-sync`
 
@@ -415,9 +417,9 @@ Usage event cost fields (`requestsCosts`, `cursorTokenFee`, `totalCents`) **MUST
 - `email`/`userEmail` is present in every record across all streams
 - Pagination is exhausted for all paginated endpoints (no truncated results)
 - Basic authentication works correctly with the team API key
-- `descriptor.yaml` is present, valid, and lists all 5 streams with correct `bronze_table`, `primary_key`, and `cursor_field` values
-- dbt model `to_ai_dev_usage.sql` compiles successfully and produces `class_ai_dev_usage` Silver table with `tenant_id` preserved
-- `tenant_id` is present in every record emitted by the connector (injected via `AddFields` transformation)
+- `descriptor.yaml` is present at `src/ingestion/connectors/ai-dev/cursor/descriptor.yaml`, valid, and lists all 5 streams with correct `bronze_table`, `primary_key`, and `cursor_field` values (post-merge deliverable — created alongside `connector.yaml`)
+- dbt model `to_ai_dev_usage.sql` compiles successfully and produces `class_ai_dev_usage` Silver table with `tenant_id` and `data_source` preserved (post-merge deliverable — created after Bronze tables are validated)
+- `tenant_id` is present in every record emitted by the connector (injected via `AddFields` transformation in the manifest `spec.connection_specification`)
 
 ## 10. Dependencies
 
