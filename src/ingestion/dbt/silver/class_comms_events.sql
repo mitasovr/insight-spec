@@ -1,8 +1,8 @@
 {{ config(
-    materialized='view',
+    materialized='incremental',
+    unique_key='unique_key',
+    schema='silver',
     tags=['silver']
 ) }}
-
--- depends_on: {{ ref('to_comms_events') }}
 
 {{ union_by_tag('silver:class_comms_events') }}
