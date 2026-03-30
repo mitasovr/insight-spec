@@ -624,7 +624,7 @@ src/ingestion/connectors/
       schema.yml               # Column docs + tests
 ```
 
-See [Airbyte Connector DESIGN](../../airbyte-connector/specs/DESIGN.md) for detailed connector development guide.
+See [Airbyte Connector DESIGN](../../connector/specs/DESIGN.md) for detailed connector development guide.
 
 ## 4. Deployment
 
@@ -677,7 +677,7 @@ For rapid nocode connector iteration without the full Airbyte platform:
 - Commands: `check`, `discover`, `read`
 - Mount custom manifest, pipe output to local destination
 
-See [Airbyte Connector DESIGN](../../airbyte-connector/specs/DESIGN.md) for detailed debugging workflows.
+See [Airbyte Connector DESIGN](../../connector/specs/DESIGN.md) for detailed debugging workflows.
 
 ## 5. Additional Context
 
@@ -731,5 +731,5 @@ How are connector packages versioned within the monorepo? Is there a version fie
 - **PRD**: [PRD.md](PRD.md)
 - **ADR-0001**: [ADR/0001-kestra-over-airflow.md](ADR/0001-kestra-over-airflow.md) (superseded)
 - **ADR-0002**: [ADR/0002-argo-over-kestra.md](ADR/0002-argo-over-kestra.md)
-- **Airbyte Connector DESIGN**: [../../airbyte-connector/specs/DESIGN.md](../../airbyte-connector/specs/DESIGN.md)
+- **Airbyte Connector DESIGN**: [../../connector/specs/DESIGN.md](../../connector/specs/DESIGN.md)
 - **Identity Resolution DESIGN**: [../../identity-resolution/specs/DESIGN.md](../../identity-resolution/specs/DESIGN.md) -- downstream consumer

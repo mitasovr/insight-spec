@@ -198,7 +198,7 @@ Container image with all CLI tools (kubectl, helm, dbt, yq, Python) that runs in
 
 - Production: Kubernetes cluster with Airbyte, Argo Workflows, and ClickHouse in separate namespaces, deployed via Helm charts
 - Local development: Kind K8s cluster for full-stack debugging (Airbyte + Argo Workflows + ClickHouse + dbt)
-- Ultra-light development: Nocode connector Docker images run directly without Airbyte platform (see [Airbyte Connector DESIGN](../../airbyte-connector/specs/DESIGN.md))
+- Ultra-light development: Nocode connector Docker images run directly without Airbyte platform (see [Airbyte Connector DESIGN](../../connector/specs/DESIGN.md))
 - ClickHouse cluster with shard-local tables and ReplacingMergeTree engine
 - MariaDB as alternative destination for specific use cases (described separately)
 
@@ -614,7 +614,7 @@ Airbyte REST API (v1) for programmatic management of sources, destinations, conn
 
 - Author has validated connector behavior without deploying to Airbyte
 
-**Reference**: [Airbyte Connector DESIGN](../../airbyte-connector/specs/DESIGN.md)
+**Reference**: [Airbyte Connector DESIGN](../../connector/specs/DESIGN.md)
 
 ### Use Case 4: Add Data Source to Workspace
 

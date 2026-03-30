@@ -2,14 +2,13 @@
 
 Development guide and architecture for Airbyte connectors on the Insight platform. Covers declarative (nocode YAML) and CDK (Python) connector types.
 
-> **Note**: This domain replaces the previous custom Connector Framework. The old DESIGN.md in `specs/` is retained as historical reference. The current approach uses Airbyte declarative manifests and CDK.
+> **Note**: This domain replaces the previous custom Connector Framework. The DESIGN.md in `specs/` is the single authoritative connector specification, covering both declarative (nocode) and CDK (Python) patterns.
 
 ## Documents
 
 | Document | Description |
 |---|---|
-| [`specs/DESIGN.md`](specs/DESIGN.md) | Historical: custom connector framework architecture |
-| [Airbyte Connector DESIGN](../airbyte-connector/specs/DESIGN.md) | Current: declarative + CDK patterns, package structure, local debugging |
+| [`specs/DESIGN.md`](specs/DESIGN.md) | Unified connector specification: package structure, mandatory fields, manifest patterns, CDK guide, dbt rules |
 
 ## Implementation
 
@@ -307,5 +306,4 @@ The following differences exist between the current implementation (`src/ingesti
 
 | Domain | Relationship |
 |---|---|
-| [Ingestion](../ingestion/) | Parent architecture — orchestration, deployment, Terraform connections |
-| [Airbyte Connector](../airbyte-connector/) | Detailed DESIGN spec for connector development |
+| [Ingestion](../ingestion/) | Parent architecture — orchestration, deployment, connections |
