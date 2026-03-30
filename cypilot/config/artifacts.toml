@@ -114,6 +114,16 @@ path = "docs/components/connectors/hr-directory/bamboohr/specs/DESIGN.md"
 name = "BambooHR Connector Design"
 
 [[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/connectors/crm/salesforce/specs/PRD.md"
+name = "Salesforce Connector PRD"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/components/connectors/crm/salesforce/specs/DESIGN.md"
+name = "Salesforce Connector Design"
+
+[[systems.artifacts]]
 kind = "DESIGN"
 path = "docs/components/connectors/hr-directory/workday.md"
 name = "Workday Connector Specification"
@@ -257,11 +267,6 @@ name = "OpenAI API Connector Design"
 kind = "DESIGN"
 path = "docs/components/connectors/crm/hubspot.md"
 name = "HubSpot Connector Specification"
-
-[[systems.artifacts]]
-kind = "DESIGN"
-path = "docs/components/connectors/crm/salesforce.md"
-name = "Salesforce Connector Specification"
 
 [[systems.artifacts]]
 kind = "DESIGN"
