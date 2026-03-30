@@ -47,7 +47,12 @@ date: 2026-03-23
 
 ### 1.1 Architectural Vision
 
-This document describes how to develop, test, and deploy Airbyte connectors for the Insight platform. Two connector types are supported: **nocode** (Airbyte declarative YAML manifests) and **CDK** (Python connectors using Airbyte's Connector Development Kit). Both types are packaged as self-contained connector packages that include the connector definition, dbt models for Bronze-to-Silver transformation, and a descriptor YAML.
+This document describes how to develop, test, and deploy connectors for the Insight platform. There are two layers:
+
+- **Airbyte Connector** — the extraction component that knows how to pull data from a specific API. Implemented as either a declarative YAML manifest (nocode) or a Python CDK connector.
+- **Insight Connector** — a complete pipeline package that wraps an Airbyte Connector with metadata, dbt transformations, credential templates, and scheduling configuration.
+
+Two Airbyte connector types are supported: **nocode** (declarative YAML manifests) and **CDK** (Python connectors using Airbyte's Connector Development Kit).
 
 This document is the development guide for connector authors. For the overall ingestion architecture, see [Ingestion Layer DESIGN](../../ingestion/specs/DESIGN.md).
 
@@ -210,15 +215,15 @@ Self-contained unit of connector functionality: extraction definition + transfor
 
 ##### Responsibility boundaries
 
-- Does NOT manage Airbyte connection configuration (Terraform does)
-- Does NOT define orchestration schedules (Kestra does)
-- Does NOT manage credentials (Airbyte secret management does)
+- Does NOT manage Airbyte connection configuration (apply-connections.sh via Airbyte API does)
+- Does NOT define orchestration schedules directly (descriptor.yaml declares schedule, Argo CronWorkflows execute it)
+- Does NOT contain tenant credentials (tenant admins provide these in `connections/{tenant}.yaml`)
 
 ##### Related components (by ID)
 
 - `cpt-insightspec-component-ing-airbyte` — Airbyte executes the connector at runtime
 - `cpt-insightspec-component-ing-dbt` — dbt runs the package's transformation models
-- `cpt-insightspec-component-ing-terraform` — Terraform creates connections using the connector
+- `cpt-insightspec-component-ing-argo` — Argo Workflows orchestrates sync + dbt pipeline
 
 ### 3.3 API Contracts
 
@@ -362,6 +367,7 @@ src/ingestion/connectors/
   {class}/{source}/
     connector.yaml              # Nocode: Airbyte declarative manifest
     descriptor.yaml             # Package metadata (required for all types)
+    credentials.yaml.example    # Template: which credentials the connector needs
     dbt/
       to_{domain}.sql           # dbt model(s) transforming Bronze → Silver
       schema.yml                # Column documentation + dbt tests
@@ -374,6 +380,31 @@ src/ingestion/connectors/
           {stream}.json
       setup.py
       Dockerfile
+```
+
+#### Credential Separation
+
+Credentials are **never stored in the connector package**. Instead:
+
+1. The connector provides `credentials.yaml.example` — a template documenting required fields
+2. Tenant admins create `connections/{tenant}.yaml` with real values for all connectors
+3. `connections/*.yaml` files are gitignored — they never enter the repository
+
+```yaml
+# connectors/collaboration/m365/credentials.yaml.example (tracked in repo)
+azure_tenant_id: ""       # Azure AD tenant ID
+azure_client_id: ""       # App registration client ID
+azure_client_secret: ""   # App registration client secret
+```
+
+```yaml
+# connections/acme-corp.yaml (gitignored — never committed)
+tenant_id: acme_corp
+connectors:
+  m365:
+    azure_tenant_id: "63b4c45f-..."
+    azure_client_id: "309e3a13-..."
+    azure_client_secret: "G2x8Q~..."
 ```
 
 ### 4.3 Declarative Manifest (Nocode)
@@ -556,18 +587,35 @@ python -m source_{source} read --config config.json --catalog configured_catalog
 
 ### 4.5 Descriptor YAML Schema
 
-Every connector package MUST include `descriptor.yaml`:
+Every Insight Connector package MUST include `descriptor.yaml`:
 
 ```yaml
 # Connector package descriptor
-name: ms365                           # Unique connector name
+name: m365                            # Unique connector name
 version: "1.0"                        # Package version
 type: nocode                          # "nocode" or "cdk"
+
+# Orchestration
+schedule: "0 2 * * *"                 # Cron schedule for automated sync
+workflow: sync                        # Workflow template to use
+dbt_select: "tag:m365"                # dbt selector for transformations
+
+# Connection config (used by apply-connections.sh)
+connection:
+  namespace: "bronze_${tenant_id}"    # ClickHouse database per tenant
+  streams:
+    - name: email_activity
+      sync_mode: full_refresh_overwrite
+    - name: teams_activity
+      sync_mode: full_refresh_overwrite
+    - name: onedrive_activity
+      sync_mode: full_refresh_overwrite
+    - name: sharepoint_activity
+      sync_mode: full_refresh_overwrite
 
 # Silver layer targets this connector populates
 silver_targets:
   - class_comms_events
-  - class_people
 
 # Stream definitions mapping to Bronze tables
 streams:
@@ -667,40 +715,44 @@ curl -X POST "$AIRBYTE_URL/api/public/v1/sources" \
 
 #### Connection Management
 
-Connections are managed via Terraform, not through the Airbyte UI:
+Connections are managed via `apply-connections.sh` which calls the Airbyte API directly:
 
 ```bash
-cd terraform/
-terraform plan
-terraform apply
+# Update connections for a specific tenant
+./update-connections.sh my-tenant
+
+# This reads:
+#   connectors/{class}/{name}/descriptor.yaml → streams, namespace
+#   connections/my-tenant.yaml → credentials
+# And creates/updates source + destination + connection via Airbyte API
 ```
 
-### 5.2 Local Development: Full Stack (Docker Compose)
+### 5.2 Local Development: Full Stack (Kind K8s)
 
-Full stack includes Airbyte, Kestra, ClickHouse, and dbt for end-to-end testing:
+Full stack runs in a Kind Kubernetes cluster with Airbyte, Argo Workflows, ClickHouse, and dbt:
 
-```yaml
-# docker-compose.yml (simplified)
-services:
-  airbyte-server:
-    image: airbyte/airbyte:latest
-    ports: ["8000:8000"]
-  clickhouse:
-    image: clickhouse/clickhouse-server:latest
-    ports: ["8123:8123", "9000:9000"]
-  kestra:
-    image: kestra/kestra:latest
-    ports: ["8080:8080"]
+```bash
+# Start everything
+./up.sh
+
+# Run a sync pipeline
+./run-sync.sh m365 example-tenant
+
+# Monitor in Argo UI
+open http://localhost:30500
+
+# Check data in ClickHouse
+curl "http://localhost:30123/?query=SELECT+count(*)+FROM+bronze_example_tenant.email_activity"
 ```
 
 Workflow:
 
-1. `docker compose up` — start all services
-2. Register connector with local Airbyte
-3. Create connection via Airbyte UI or API
-4. Trigger sync manually or via Kestra
-5. Run `dbt run` against local ClickHouse
-6. Verify Silver tables
+1. `./up.sh` — start Kind cluster + all services
+2. Connectors registered automatically via `upload-manifests.sh`
+3. Connections created via `apply-connections.sh` (reads tenant YAML)
+4. Trigger sync via `./run-sync.sh` or Argo CronWorkflow schedule
+5. dbt runs automatically as pipeline step
+6. Verify Silver tables in ClickHouse
 
 ### 5.3 Local Development: Ultra-Light (source.sh)
 

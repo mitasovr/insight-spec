@@ -1,7 +1,77 @@
 # Ingestion Stack
 
 Data pipeline: External APIs → Airbyte → ClickHouse Bronze → dbt → Silver.
-Everything runs in a Kind Kubernetes cluster.
+Everything runs in a Kubernetes cluster (Kind for local development).
+
+## Concepts
+
+### Insight Connector vs Airbyte Connector
+
+An **Airbyte Connector** knows how to extract data from a specific API:
+- `connector.yaml` — declarative manifest (or Docker image for CDK connectors)
+- Implements Airbyte Protocol: check, discover, read
+
+An **Insight Connector** is a complete pipeline package built around an Airbyte Connector:
+
+```
+Insight Connector = Airbyte Connector + descriptor + dbt transformations + credentials template
+```
+
+| Component | Purpose | Who manages |
+|-----------|---------|-------------|
+| `connector.yaml` | Airbyte manifest — how to extract data | Connector developer |
+| `descriptor.yaml` | Schedule, streams, dbt_select, workflow type | Connector developer |
+| `credentials.yaml.example` | Template listing required credentials | Connector developer |
+| `dbt/` | Bronze → Silver transformations | Connector developer |
+| `connections/{tenant}.yaml` | Real credentials per tenant | Tenant admin |
+
+Connector developers create the package. Tenant admins only fill in credentials — they never touch the connector code.
+
+### Credential Separation
+
+Credentials are strictly separated from connector code:
+
+```
+connectors/collaboration/m365/            # In repo (shared, read-only for tenants)
+  connector.yaml                          #   Airbyte manifest
+  descriptor.yaml                         #   Metadata + schedule
+  credentials.yaml.example                #   Template: which credentials are needed
+  dbt/                                    #   Transformations
+
+connections/                              # Per-tenant credentials
+  example-tenant.yaml.example             #   Template (tracked in repo)
+  example-tenant.yaml                     #   Real credentials (NEVER committed)
+```
+
+One tenant = one file with all credentials for all connectors:
+
+```yaml
+# connections/acme-corp.yaml (gitignored — never committed)
+tenant_id: acme_corp
+
+connectors:
+  m365:
+    azure_tenant_id: "63b4c45f-..."
+    azure_client_id: "309e3a13-..."
+    azure_client_secret: "G2x8Q~..."
+  bamboohr:
+    api_key: "abc123..."
+    subdomain: "acme"
+  jira:
+    domain: "acme.atlassian.net"
+    email: "integration@acme.com"
+    api_token: "ATATT3x..."
+```
+
+Each connector's `credentials.yaml.example` documents what's required:
+
+```yaml
+# connectors/collaboration/m365/credentials.yaml.example
+# Required credentials for M365 connector
+azure_tenant_id: ""       # Azure AD tenant ID
+azure_client_id: ""       # App registration client ID
+azure_client_secret: ""   # App registration client secret
+```
 
 ## Prerequisites
 
@@ -82,16 +152,17 @@ src/ingestion/
 ├── update-connections.sh            # Re-apply connections
 ├── update-workflows.sh              # Regenerate schedules
 │
-├── connectors/                      # Connector packages
+├── connectors/                      # Insight Connector packages
 │   └── collaboration/m365/
 │       ├── connector.yaml           #   Airbyte declarative manifest
 │       ├── descriptor.yaml          #   Schedule, streams, dbt_select
+│       ├── credentials.yaml.example #   Credential template (tracked)
 │       ├── .env.local               #   Test credentials (gitignored)
 │       └── dbt/
 │           ├── to_comms_events.sql  #   Bronze → Silver model
 │           └── schema.yml           #   Source + tests
 │
-├── connections/                     # Tenant configs
+├── connections/                     # Tenant credential files
 │   ├── example-tenant.yaml.example  #   Template (tracked)
 │   ├── example-tenant.yaml          #   Real credentials (gitignored)
 │   └── .state/                      #   Generated IDs (gitignored)
@@ -116,7 +187,7 @@ src/ingestion/
 │   ├── argo/                        #   Helm values + RBAC
 │   └── clickhouse/                  #   Deployment, Service, PVC, ConfigMap
 │
-├── scripts/                         # Internal scripts (used by toolbox)
+├── scripts/                         # Internal scripts (run inside toolbox)
 │   ├── init.sh                      #   Full initialization
 │   ├── resolve-airbyte-env.sh       #   JWT token + workspace resolution
 │   ├── upload-manifests.sh          #   Register connectors via API
@@ -126,7 +197,7 @@ src/ingestion/
 │
 └── tools/
     ├── toolbox/                     # insight-toolbox Docker image
-    │   ├── Dockerfile               #   python + dbt + kubectl + yq + tofu
+    │   ├── Dockerfile               #   python + dbt + kubectl + yq
     │   └── build.sh                 #   Build + load into Kind
     └── declarative-connector/       # Local connector debugging
         └── source.sh               #   check / discover / read
@@ -134,14 +205,15 @@ src/ingestion/
 
 ## Adding a New Connector
 
-1. Create package:
+1. Create the Insight Connector package:
    ```
    connectors/{category}/{name}/
-     connector.yaml       # Airbyte manifest
-     descriptor.yaml      # name, schedule, streams, dbt_select, workflow
+     connector.yaml            # Airbyte manifest
+     descriptor.yaml           # name, schedule, streams, dbt_select, workflow
+     credentials.yaml.example  # Required credentials (template)
      dbt/
-       to_{domain}.sql    # Transformation
-       schema.yml         # Source definition + tests
+       to_{domain}.sql         # Transformation
+       schema.yml              # Source definition + tests
    ```
 
 2. Add credentials to tenant config:
