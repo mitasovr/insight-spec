@@ -68,6 +68,16 @@ path = "docs/components/connectors/git/github.md"
 name = "GitHub Connector Specification"
 
 [[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/connectors/git/github/specs/PRD.md"
+name = "GitHub Connector PRD"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/components/connectors/git/github/specs/DESIGN.md"
+name = "GitHub Connector Design"
+
+[[systems.artifacts]]
 kind = "DESIGN"
 path = "docs/components/connectors/git/bitbucket.md"
 name = "Bitbucket Connector Specification"
@@ -118,9 +128,14 @@ path = "docs/components/connectors/task-tracking/jira.md"
 name = "Jira Connector Specification"
 
 [[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/connectors/collaboration/m365/specs/PRD.md"
+name = "Microsoft 365 Connector PRD"
+
+[[systems.artifacts]]
 kind = "DESIGN"
-path = "docs/components/connectors/m365.md"
-name = "Microsoft 365 Connector Specification"
+path = "docs/components/connectors/collaboration/m365/specs/DESIGN.md"
+name = "Microsoft 365 Connector Design"
 
 [[systems.artifacts]]
 kind = "DESIGN"
@@ -218,6 +233,65 @@ path = "docs/components/connectors/allure.md"
 name = "Allure TestOps Connector Specification"
 
 [[systems.artifacts]]
+kind = "PRD"
+path = "docs/domain/connector/specs/PRD.md"
+name = "Connector Framework"
+
+[[systems.artifacts]]
 kind = "DESIGN"
 path = "docs/domain/connector/specs/DESIGN.md"
 name = "Connector Framework Design"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/domain/connector/specs/ADR/0001-connector-integration-protocol.md"
+name = "ADR-0001: Connector-to-System Integration Protocol"
+
+[[systems.artifacts]]
+kind = "DECOMPOSITION"
+path = "docs/domain/ingestion/specs/DECOMPOSITION.md"
+name = "Ingestion Layer Decomposition"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "PRD"
+path = "docs/domain/ingestion/specs/PRD.md"
+name = "Ingestion Layer PRD"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/domain/ingestion/specs/DESIGN.md"
+name = "Ingestion Layer Design"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/domain/ingestion/specs/ADR/0001-kestra-over-airflow.md"
+name = "ADR-0001: Kestra over Airflow (superseded)"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/domain/ingestion/specs/ADR/0002-argo-over-kestra.md"
+name = "ADR-0002: Argo Workflows over Kestra"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/domain/airbyte-connector/specs/DESIGN.md"
+name = "Airbyte Connector Development Guide"
+traceability = "DOCS-ONLY"
+
+[[systems]]
+name = "Orchestrator"
+slug = "orch"
+kit = "sdlc"
+codebase = ["docs/components/orchestrator"]
+children = []
+
+[[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/orchestrator/specs/PRD.md"
+name = "Orchestrator PRD"
+traceability = "DOCS-ONLY"

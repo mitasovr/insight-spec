@@ -15,6 +15,7 @@ Data-source agnostic specification for Version Control connectors. Defines unifi
   - [`git_commits`](#git_commits)
   - [`git_commits_ext` — Extended commit properties](#git_commits_ext-extended-commit-properties)
   - [`git_commit_files` — Per-file line changes](#git_commit_files-per-file-line-changes)
+  - [`git_commits_files_ext` — Extended per-file properties](#git_commits_files_ext-extended-per-file-properties)
   - [`git_pull_requests`](#git_pull_requests)
   - [`git_pull_requests_ext` — Extended PR properties](#git_pull_requests_ext-extended-pr-properties)
   - [`git_pull_requests_reviewers` — Review submissions and approvals](#git_pull_requests_reviewers-review-submissions-and-approvals)
@@ -72,6 +73,8 @@ Data-source agnostic specification for Version Control connectors. Defines unifi
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework; partitions all data by customer |
+| `source_instance_id` | String | REQUIRED | Source instance identifier (e.g. `github-acme-prod`) |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Organization/workspace/project key |
 | `repo_slug` | String | REQUIRED | Repository name/slug |
@@ -113,116 +116,122 @@ Data-source agnostic specification for Version Control connectors. Defines unifi
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier (e.g. `github-acme-prod`) |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner — joins to `git_repositories.project_key` |
 | `repo_slug` | String | REQUIRED | Repository name — joins to `git_repositories.repo_slug` |
-| `property_key` | String | REQUIRED | Property name (e.g., `total_loc`, `active_contributors_30d`, `code_health_score`) |
-| `property_value` | String | REQUIRED | Property value (stored as string, can be JSON for complex values) |
-| `property_type` | String | REQUIRED | Value type hint: `string`, `number`, `boolean`, `json` |
+| `field_id` | String | REQUIRED | Machine identifier for the property (e.g. `total_loc`, `code_health_score`) |
+| `field_name` | String | REQUIRED | Human-readable label for the property (e.g. `"Total Lines of Code"`) |
+| `field_value_str` | String | NULLABLE | String / JSON / enum value; NULL when the property is purely numeric |
+| `field_value_int` | Int64 | NULLABLE | Integer or boolean (0/1) value; NULL when the property is not an integer |
+| `field_value_float` | Float64 | NULLABLE | Fractional numeric value; NULL when the property is not a float |
 | `collected_at` | DateTime64(3) | REQUIRED | When this property was collected/computed |
 | `data_source` | String | DEFAULT '' | Source discriminator — joins to `git_repositories.data_source` |
 | `_version` | UInt64 | REQUIRED | Deduplication version |
 
+**Value column rules**: at least one of `field_value_str`, `field_value_int`, `field_value_float` must be non-NULL. Integer-valued properties (counts, flags) use `field_value_int`; fractional values use `field_value_float`; string, JSON, and enum values use `field_value_str`. Boolean flags use `field_value_int` with values `0` / `1`.
+
 **Indexes**:
-- `idx_repo_ext_lookup`: `(project_key, repo_slug, property_key, data_source)`
-- `idx_repo_property_key`: `(property_key)`
+- `idx_repo_ext_lookup`: `(tenant_id, source_instance_id, project_key, repo_slug, field_id, data_source)`
+- `idx_repo_field_id`: `(field_id)`
 
 **Purpose**: Flexible key-value table for storing extended repository properties without modifying the core `git_repositories` schema. Enables addition of aggregated statistics, analysis results, and health metrics computed from commit/PR history without schema migrations.
 
 **Common property keys**:
 
 **Code statistics**:
-- `total_loc` — Total lines of code across all files — type: `number`
-- `total_files` — Total number of files in repository — type: `number`
-- `language_breakdown` — Distribution of languages, e.g. `{"TypeScript": 45.2, "Python": 32.1, "Go": 22.7}` (percentages) — type: `json`
-- `loc_by_language` — Lines of code per language, e.g. `{"TypeScript": 12450, "Python": 8920}` — type: `json`
-- `binary_files_count` — Number of binary files — type: `number`
-- `documentation_coverage` — Percentage of code with documentation — type: `number`
+- `total_loc` — Total lines of code across all files — value: `field_value_int`
+- `total_files` — Total number of files in repository — value: `field_value_int`
+- `language_breakdown` — Distribution of languages, e.g. `{"TypeScript": 45.2, "Python": 32.1, "Go": 22.7}` (percentages) — value: `field_value_str` (JSON)
+- `loc_by_language` — Lines of code per language, e.g. `{"TypeScript": 12450, "Python": 8920}` — value: `field_value_str` (JSON)
+- `binary_files_count` — Number of binary files — value: `field_value_int`
+- `documentation_coverage` — Percentage of code with documentation — value: `field_value_float`
 
 **Activity metrics**:
-- `active_contributors_30d` — Number of unique contributors in last 30 days — type: `number`
-- `active_contributors_90d` — Number of unique contributors in last 90 days — type: `number`
-- `total_contributors` — Total unique contributors all-time — type: `number`
-- `commit_frequency_30d` — Average commits per day in last 30 days — type: `number`
-- `pr_frequency_30d` — Average PRs per day in last 30 days — type: `number`
-- `last_activity_date` — Date of last commit or PR — type: `string` (ISO date)
+- `active_contributors_30d` — Number of unique contributors in last 30 days — value: `field_value_int`
+- `active_contributors_90d` — Number of unique contributors in last 90 days — value: `field_value_int`
+- `total_contributors` — Total unique contributors all-time — value: `field_value_int`
+- `commit_frequency_30d` — Average commits per day in last 30 days — value: `field_value_float`
+- `pr_frequency_30d` — Average PRs per day in last 30 days — value: `field_value_float`
+- `last_activity_date` — Date of last commit or PR — value: `field_value_str` (ISO date)
 
 **Quality metrics**:
-- `code_health_score` — Overall code health score (0.0–100.0) — type: `number`
-- `test_coverage_percentage` — Average test coverage across codebase — type: `number`
-- `complexity_score` — Average code complexity metric — type: `number`
-- `technical_debt_ratio` — Ratio of technical debt to total code — type: `number`
-- `code_duplication_percentage` — Percentage of duplicated code — type: `number`
-- `security_vulnerabilities_count` — Number of known security vulnerabilities — type: `number`
-- `license_compliance_score` — License compliance score (0.0–100.0) — type: `number`
+- `code_health_score` — Overall code health score (0.0–100.0) — value: `field_value_float`
+- `test_coverage_percentage` — Average test coverage across codebase — value: `field_value_float`
+- `complexity_score` — Average code complexity metric — value: `field_value_float`
+- `technical_debt_ratio` — Ratio of technical debt to total code — value: `field_value_float`
+- `code_duplication_percentage` — Percentage of duplicated code — value: `field_value_float`
+- `security_vulnerabilities_count` — Number of known security vulnerabilities — value: `field_value_int`
+- `license_compliance_score` — License compliance score (0.0–100.0) — value: `field_value_float`
 
 **AI analysis**:
-- `ai_generated_percentage` — Estimated percentage of AI-generated code — type: `number`
-- `third_party_code_percentage` — Percentage of third-party code — type: `number`
-- `third_party_licenses` — List of detected third-party licenses — type: `json`
+- `ai_generated_percentage` — Estimated percentage of AI-generated code — value: `field_value_float`
+- `third_party_code_percentage` — Percentage of third-party code — value: `field_value_float`
+- `third_party_licenses` — List of detected third-party licenses — value: `field_value_str` (JSON)
 
 **Repository health**:
-- `is_archived` — Repository is archived (0 or 1) — type: `boolean`
-- `is_stale` — No activity in last 90 days (0 or 1) — type: `boolean`
-- `is_monorepo` — Repository is a monorepo (0 or 1) — type: `boolean`
-- `primary_framework` — Main framework/stack detected (e.g., "React", "Django") — type: `string`
-- `deployment_frequency_30d` — Deployments per day in last 30 days — type: `number`
-- `mean_time_to_recovery` — Average time to fix production issues (hours) — type: `number`
+- `is_archived` — Repository is archived (0 or 1) — value: `field_value_int`
+- `is_stale` — No activity in last 90 days (0 or 1) — value: `field_value_int`
+- `is_monorepo` — Repository is a monorepo (0 or 1) — value: `field_value_int`
+- `primary_framework` — Main framework/stack detected (e.g., "React", "Django") — value: `field_value_str`
+- `deployment_frequency_30d` — Deployments per day in last 30 days — value: `field_value_float`
+- `mean_time_to_recovery` — Average time to fix production issues (hours) — value: `field_value_float`
 
 **Collaboration metrics**:
-- `avg_pr_cycle_time_hours` — Average PR cycle time in hours — type: `number`
-- `avg_review_depth_score` — Average review quality score — type: `number`
-- `bus_factor` — Number of people needed to lose to stall project — type: `number`
-- `contributor_diversity_score` — Distribution evenness of contributions (0.0–1.0) — type: `number`
+- `avg_pr_cycle_time_hours` — Average PR cycle time in hours — value: `field_value_float`
+- `avg_review_depth_score` — Average review quality score — value: `field_value_float`
+- `bus_factor` — Number of people needed to lose to stall project — value: `field_value_int`
+- `contributor_diversity_score` — Distribution evenness of contributions (0.0–1.0) — value: `field_value_float`
 
 **Trend data**:
-- `loc_trend_30d` — LOC change over last 30 days — type: `json` (time series)
-- `contributor_trend_90d` — Contributor count trend over last 90 days — type: `json` (time series)
-- `velocity_trend_30d` — Commit/PR velocity trend — type: `json` (time series)
+- `loc_trend_30d` — LOC change over last 30 days — value: `field_value_str` (JSON time series)
+- `contributor_trend_90d` — Contributor count trend over last 90 days — value: `field_value_str` (JSON time series)
+- `velocity_trend_30d` — Commit/PR velocity trend — value: `field_value_str` (JSON time series)
 
 **Usage example**:
 ```sql
 -- Get total LOC for a specific repository
-SELECT property_value 
+SELECT field_value_int 
 FROM git_repositories_ext 
 WHERE project_key = 'MyOrg' 
   AND repo_slug = 'my-repo'
-  AND property_key = 'total_loc'
+  AND field_id = 'total_loc'
   AND data_source = 'insight_github';
 
 -- Get language breakdown for all repositories in an org
-SELECT r.repo_slug, ext.property_value as language_breakdown
+SELECT r.repo_slug, ext.field_value_str AS language_breakdown
 FROM git_repositories r
 JOIN git_repositories_ext ext 
   ON r.project_key = ext.project_key 
   AND r.repo_slug = ext.repo_slug
   AND r.data_source = ext.data_source
 WHERE r.project_key = 'MyOrg'
-  AND ext.property_key = 'language_breakdown';
+  AND ext.field_id = 'language_breakdown';
 
--- Find all stale repositories
+-- Find all stale repositories (boolean flag stored as int 0/1)
 SELECT r.project_key, r.repo_slug, r.last_commit_date
 FROM git_repositories r
 JOIN git_repositories_ext ext 
   ON r.project_key = ext.project_key 
   AND r.repo_slug = ext.repo_slug
   AND r.data_source = ext.data_source
-WHERE ext.property_key = 'is_stale'
-  AND ext.property_value = '1';
+WHERE ext.field_id = 'is_stale'
+  AND ext.field_value_int = 1;
 
--- Get code health metrics for active repos
+-- Aggregate code health metrics — no casting needed
 SELECT 
   r.repo_slug,
-  MAX(CASE WHEN ext.property_key = 'code_health_score' THEN ext.property_value END) as health_score,
-  MAX(CASE WHEN ext.property_key = 'test_coverage_percentage' THEN ext.property_value END) as test_coverage,
-  MAX(CASE WHEN ext.property_key = 'complexity_score' THEN ext.property_value END) as complexity
+  MAX(CASE WHEN ext.field_id = 'code_health_score'       THEN ext.field_value_float END) AS health_score,
+  MAX(CASE WHEN ext.field_id = 'test_coverage_percentage' THEN ext.field_value_float END) AS test_coverage,
+  MAX(CASE WHEN ext.field_id = 'complexity_score'        THEN ext.field_value_float END) AS complexity
 FROM git_repositories r
 JOIN git_repositories_ext ext 
   ON r.project_key = ext.project_key 
   AND r.repo_slug = ext.repo_slug
   AND r.data_source = ext.data_source
 WHERE r.is_empty = 0
-  AND ext.property_key IN ('code_health_score', 'test_coverage_percentage', 'complexity_score')
+  AND ext.field_id IN ('code_health_score', 'test_coverage_percentage', 'complexity_score')
 GROUP BY r.repo_slug;
 ```
 
@@ -240,6 +249,8 @@ GROUP BY r.repo_slug;
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier (e.g. `bitbucket-acme-prod`) |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner |
 | `repo_slug` | String | REQUIRED | Repository name |
@@ -263,6 +274,8 @@ GROUP BY r.repo_slug;
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier (e.g. `github-acme-prod`) |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner |
 | `repo_slug` | String | REQUIRED | Repository name |
@@ -298,55 +311,72 @@ GROUP BY r.repo_slug;
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner — joins to `git_commits.project_key` |
 | `repo_slug` | String | REQUIRED | Repository name — joins to `git_commits.repo_slug` |
 | `commit_hash` | String | REQUIRED | Commit SHA — joins to `git_commits.commit_hash` |
-| `property_key` | String | REQUIRED | Property name (e.g., `ai_percentage`, `scancode_metadata`, `language_breakdown`) |
-| `property_value` | String | REQUIRED | Property value (stored as string, can be JSON for complex values) |
-| `property_type` | String | REQUIRED | Value type hint: `string`, `number`, `boolean`, `json` |
+| `field_id` | String | REQUIRED | Machine identifier for the property (e.g. `ai_percentage`, `scancode_metadata`) |
+| `field_name` | String | REQUIRED | Human-readable label for the property (e.g. `"AI-generated percentage"`) |
+| `field_value_str` | String | NULLABLE | String / JSON / enum value; NULL when the property is purely numeric |
+| `field_value_int` | Int64 | NULLABLE | Integer or boolean (0/1) value; NULL when the property is not an integer |
+| `field_value_float` | Float64 | NULLABLE | Fractional numeric value; NULL when the property is not a float |
 | `collected_at` | DateTime64(3) | REQUIRED | When this property was collected/computed |
 | `data_source` | String | DEFAULT '' | Source discriminator — joins to `git_commits.data_source` |
 | `_version` | UInt64 | REQUIRED | Deduplication version |
 
+**Value column rules**: at least one of `field_value_str`, `field_value_int`, `field_value_float` must be non-NULL. Boolean flags use `field_value_int` (`0`/`1`); fractional scores use `field_value_float`; JSON and string values use `field_value_str`.
+
 **Indexes**:
-- `idx_commit_ext_lookup`: `(project_key, repo_slug, commit_hash, property_key, data_source)`
-- `idx_property_key`: `(property_key)`
+- `idx_commit_ext_lookup`: `(tenant_id, source_instance_id, project_key, repo_slug, commit_hash, field_id, data_source)`
+- `idx_commit_ext_field_id`: `(field_id)`
 
 **Purpose**: Flexible key-value table for storing extended commit properties without modifying the core `git_commits` schema. Enables addition of new analysis results (AI detection, license scanning, security analysis, code quality metrics) without schema migrations.
 
 **Common property keys**:
-- `ai_percentage` — AI-generated code estimate (0.0–1.0) — type: `number`
-- `ai_thirdparty_flag` — AI-detected third-party code (0 or 1) — type: `boolean`
-- `ai_thirdparty_repos` — Third-party repository detection metadata — type: `json`
-- `scancode_metadata` — License and copyright scanning results — type: `json`
-- `scancode_thirdparty_flag` — License scanner detected third-party (0 or 1) — type: `boolean`
-- `language_breakdown` — Lines per language, e.g. `{"TypeScript": 120, "Python": 45}` — type: `json`
-- `hash_sum` — Deduplication hash for multi-file commits — type: `string`
-- `security_scan_results` — Security vulnerability scan results — type: `json`
-- `code_quality_score` — Static analysis quality score — type: `number`
-- `test_coverage_delta` — Change in test coverage from this commit — type: `number`
+- `ai_percentage` — AI-generated code estimate (0.0–1.0) — value: `field_value_float`
+- `ai_thirdparty_flag` — AI-detected third-party code (0 or 1) — value: `field_value_int`
+- `ai_thirdparty_repos` — Third-party repository detection metadata — value: `field_value_str` (JSON)
+- `scancode_metadata` — License and copyright scanning results — value: `field_value_str` (JSON)
+- `scancode_thirdparty_flag` — License scanner detected third-party (0 or 1) — value: `field_value_int`
+- `language_breakdown` — Lines per language, e.g. `{"TypeScript": 120, "Python": 45}` — value: `field_value_str` (JSON)
+- `hash_sum` — Deduplication hash for multi-file commits — value: `field_value_str`
+- `security_scan_results` — Security vulnerability scan results — value: `field_value_str` (JSON)
+- `code_quality_score` — Static analysis quality score — value: `field_value_float`
+- `test_coverage_delta` — Change in test coverage from this commit — value: `field_value_float`
 
 **Usage example**:
 ```sql
--- Get AI percentage for a specific commit
-SELECT property_value 
-FROM git_commits_ext 
-WHERE commit_hash = 'abc123...' 
-  AND property_key = 'ai_percentage'
+-- Get AI percentage for a specific commit (no casting needed)
+SELECT field_value_float
+FROM git_commits_ext
+WHERE tenant_id = '...'
+  AND commit_hash = 'abc123...'
+  AND field_id = 'ai_percentage'
   AND data_source = 'insight_github';
 
--- Get all language breakdowns for commits in a repo
-SELECT commit_hash, property_value as language_breakdown
+-- Find all third-party flagged commits (integer comparison, no string cast)
+SELECT commit_hash, field_value_int AS ai_thirdparty
 FROM git_commits_ext
-WHERE project_key = 'MyOrg'
+WHERE tenant_id = '...'
+  AND project_key = 'MyOrg'
   AND repo_slug = 'my-repo'
-  AND property_key = 'language_breakdown';
+  AND field_id = 'ai_thirdparty_flag'
+  AND field_value_int = 1;
+
+-- Average AI percentage across a repo
+SELECT AVG(field_value_float) AS avg_ai_pct
+FROM git_commits_ext
+WHERE tenant_id = '...'
+  AND project_key = 'MyOrg'
+  AND repo_slug = 'my-repo'
+  AND field_id = 'ai_percentage';
 ```
 
 **Design rationale**: 
 - **Flexibility**: Add new properties without schema changes
-- **Efficiency**: Query only needed properties via index on `property_key`
+- **Efficiency**: Query only needed properties via index on `field_id`
 - **Versioning**: Track when each property was computed via `collected_at`
 - **Normalization**: Avoid wide table with many NULL values
 - **Evolution**: Properties can be deprecated or renamed without data migration
@@ -357,6 +387,8 @@ WHERE project_key = 'MyOrg'
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner |
 | `repo_slug` | String | REQUIRED | Repository name |
@@ -366,9 +398,6 @@ WHERE project_key = 'MyOrg'
 | `file_extension` | String | NULLABLE | File extension (e.g., "py", "java", "ts") |
 | `lines_added` | Int64 | NULLABLE | Lines added in this file |
 | `lines_removed` | Int64 | NULLABLE | Lines removed in this file |
-| `ai_thirdparty_flag` | UInt8 | DEFAULT 0 | AI-detected third-party code flag (0 or 1) |
-| `scancode_thirdparty_flag` | UInt8 | DEFAULT 0 | License scanner detected third-party flag (0 or 1) |
-| `scancode_metadata` | String | NULLABLE | License and copyright info as JSON |
 | `collected_at` | DateTime64(3) | REQUIRED | Collection timestamp |
 | `data_source` | String | REQUIRED | Source discriminator |
 | `_version` | UInt64 | REQUIRED | Deduplication version |
@@ -378,12 +407,86 @@ WHERE project_key = 'MyOrg'
 
 **Purpose**: Granular file-level analysis for commit impact. Enables queries like "show all changes to authentication files" or "calculate churn per directory."
 
+**Note**: Extended per-file properties (AI detection flags, license scanning results) are stored in the separate `git_commits_files_ext` table to maintain schema flexibility.
+
+---
+
+### `git_commits_files_ext` — Extended per-file properties
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
+| `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
+| `project_key` | String | REQUIRED | Repository owner — joins to `git_commit_files.project_key` |
+| `repo_slug` | String | REQUIRED | Repository name — joins to `git_commit_files.repo_slug` |
+| `commit_hash` | String | REQUIRED | Commit SHA — joins to `git_commit_files.commit_hash` |
+| `file_path` | String | REQUIRED | File path — joins to `git_commit_files.file_path` |
+| `field_id` | String | REQUIRED | Machine identifier for the property (e.g. `ai_thirdparty_flag`, `scancode_metadata`) |
+| `field_name` | String | REQUIRED | Human-readable label for the property (e.g. `"AI Third-party Flag"`) |
+| `field_value_str` | String | NULLABLE | String / JSON value; NULL when the property is purely numeric |
+| `field_value_int` | Int64 | NULLABLE | Integer or boolean (0/1) value; NULL when the property is not an integer |
+| `field_value_float` | Float64 | NULLABLE | Fractional numeric value; NULL when the property is not a float |
+| `collected_at` | DateTime64(3) | REQUIRED | When this property was collected/computed |
+| `data_source` | String | DEFAULT '' | Source discriminator — joins to `git_commit_files.data_source` |
+| `_version` | UInt64 | REQUIRED | Deduplication version |
+
+**Value column rules**: at least one of `field_value_str`, `field_value_int`, `field_value_float` must be non-NULL. Boolean flags use `field_value_int` (`0`/`1`); JSON results use `field_value_str`.
+
+**Indexes**:
+- `idx_commit_file_ext_lookup`: `(tenant_id, source_instance_id, project_key, repo_slug, commit_hash, file_path, field_id, data_source)`
+- `idx_file_ext_field_id`: `(field_id)`
+
+**Purpose**: Flexible key-value table for storing extended per-file properties without modifying the core `git_commit_files` schema. Enables addition of new file-level analysis results (AI detection, license scanning, security analysis) without schema migrations.
+
+**Common property keys**:
+- `ai_thirdparty_flag` — AI-detected third-party code (0 or 1) — value: `field_value_int`
+- `scancode_thirdparty_flag` — License scanner detected third-party (0 or 1) — value: `field_value_int`
+- `scancode_metadata` — License and copyright scanning results for this file — value: `field_value_str` (JSON)
+
+**Usage example**:
+```sql
+-- Find all files with third-party code in a repository (integer comparison, no cast)
+SELECT cf.commit_hash, cf.file_path, cf.file_extension,
+       ext.field_id, ext.field_value_int
+FROM git_commit_files cf
+JOIN git_commits_files_ext ext
+  ON cf.tenant_id = ext.tenant_id
+  AND cf.project_key = ext.project_key
+  AND cf.repo_slug = ext.repo_slug
+  AND cf.commit_hash = ext.commit_hash
+  AND cf.file_path = ext.file_path
+  AND cf.data_source = ext.data_source
+WHERE cf.tenant_id = '...'
+  AND cf.project_key = 'MyOrg'
+  AND cf.repo_slug = 'my-repo'
+  AND ext.field_id IN ('ai_thirdparty_flag', 'scancode_thirdparty_flag')
+  AND ext.field_value_int = 1;
+
+-- Get scancode metadata (JSON) for all files in a commit
+SELECT file_path, field_value_str AS scancode_metadata
+FROM git_commits_files_ext
+WHERE commit_hash = 'abc123...'
+  AND field_id = 'scancode_metadata'
+  AND data_source = 'insight_bitbucket_server';
+```
+
+**Design rationale**:
+- **Flexibility**: Add new per-file properties without schema changes
+- **Efficiency**: Query only needed properties via index on `field_id`
+- **Versioning**: Track when each property was computed via `collected_at`
+- **Normalization**: Avoid wide table with many NULL values
+- **Evolution**: Properties can be deprecated or renamed without data migration
+- **Optional enrichment**: Not every deployment runs AI detection or ScanCode; rows are only inserted when those pipelines are active
+
 ---
 
 ### `git_pull_requests`
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner |
 | `repo_slug` | String | REQUIRED | Repository name |
@@ -431,76 +534,98 @@ WHERE project_key = 'MyOrg'
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner — joins to `git_pull_requests.project_key` |
 | `repo_slug` | String | REQUIRED | Repository name — joins to `git_pull_requests.repo_slug` |
 | `pr_id` | Int64 | REQUIRED | PR database ID — joins to `git_pull_requests.pr_id` |
-| `property_key` | String | REQUIRED | Property name (e.g., `review_depth_score`, `ai_generated_percentage`, `cycle_time_hours`) |
-| `property_value` | String | REQUIRED | Property value (stored as string, can be JSON for complex values) |
-| `property_type` | String | REQUIRED | Value type hint: `string`, `number`, `boolean`, `json` |
+| `field_id` | String | REQUIRED | Machine identifier for the property (e.g. `review_depth_score`, `cycle_time_hours`) |
+| `field_name` | String | REQUIRED | Human-readable label for the property (e.g. `"Review Depth Score"`) |
+| `field_value_str` | String | NULLABLE | String / JSON value; NULL when the property is purely numeric |
+| `field_value_int` | Int64 | NULLABLE | Integer or boolean (0/1) value; NULL when the property is not an integer |
+| `field_value_float` | Float64 | NULLABLE | Fractional numeric value; NULL when the property is not a float |
 | `collected_at` | DateTime64(3) | REQUIRED | When this property was collected/computed |
 | `data_source` | String | DEFAULT '' | Source discriminator — joins to `git_pull_requests.data_source` |
 | `_version` | UInt64 | REQUIRED | Deduplication version |
 
+**Value column rules**: at least one of `field_value_str`, `field_value_int`, `field_value_float` must be non-NULL. Boolean flags use `field_value_int` (`0`/`1`); duration/score values use `field_value_float`; JSON results use `field_value_str`.
+
 **Indexes**:
-- `idx_pr_ext_lookup`: `(project_key, repo_slug, pr_id, property_key, data_source)`
-- `idx_pr_property_key`: `(property_key)`
+- `idx_pr_ext_lookup`: `(tenant_id, source_instance_id, project_key, repo_slug, pr_id, field_id, data_source)`
+- `idx_pr_ext_field_id`: `(field_id)`
 
 **Purpose**: Flexible key-value table for storing extended PR properties without modifying the core `git_pull_requests` schema. Enables addition of new analysis results (review quality metrics, AI-assisted PR detection, security analysis, complexity scores) without schema migrations.
 
 **Common property keys**:
-- `review_depth_score` — Quality/depth of code review (0.0–1.0) — type: `number`
-- `review_participation_ratio` — Percentage of team members who reviewed — type: `number`
-- `ai_generated_percentage` — Estimated AI-generated code in PR (0.0–1.0) — type: `number`
-- `ai_assisted_pr_flag` — PR created/assisted by AI tools (0 or 1) — type: `boolean`
-- `cycle_time_hours` — Time from first commit to merge in hours — type: `number`
-- `pickup_time_hours` — Time from PR creation to first review in hours — type: `number`
-- `rework_ratio` — Ratio of rework commits to total commits — type: `number`
-- `approval_velocity` — Average time to approval in hours — type: `number`
-- `complexity_score` — Code complexity metric — type: `number`
-- `security_scan_results` — Security vulnerability scan results — type: `json`
-- `test_coverage_delta` — Change in test coverage from this PR — type: `number`
-- `breaking_change_flag` — PR contains breaking changes (0 or 1) — type: `boolean`
-- `hotfix_flag` — PR is a hotfix (0 or 1) — type: `boolean`
-- `docs_only_flag` — PR only changes documentation (0 or 1) — type: `boolean`
-- `draft_pr_flag` — PR was created as draft (GitHub-specific, 0 or 1) — type: `boolean`
-- `diffstat_metadata` — Detailed file-level diff statistics — type: `json`
+- `review_depth_score` — Quality/depth of code review (0.0–1.0) — value: `field_value_float`
+- `review_participation_ratio` — Percentage of team members who reviewed — value: `field_value_float`
+- `ai_generated_percentage` — Estimated AI-generated code in PR (0.0–1.0) — value: `field_value_float`
+- `ai_assisted_pr_flag` — PR created/assisted by AI tools (0 or 1) — value: `field_value_int`
+- `cycle_time_hours` — Time from first commit to merge in hours — value: `field_value_float`
+- `pickup_time_hours` — Time from PR creation to first review in hours — value: `field_value_float`
+- `rework_ratio` — Ratio of rework commits to total commits — value: `field_value_float`
+- `approval_velocity` — Average time to approval in hours — value: `field_value_float`
+- `complexity_score` — Code complexity metric — value: `field_value_float`
+- `security_scan_results` — Security vulnerability scan results — value: `field_value_str` (JSON)
+- `test_coverage_delta` — Change in test coverage from this PR — value: `field_value_float`
+- `breaking_change_flag` — PR contains breaking changes (0 or 1) — value: `field_value_int`
+- `hotfix_flag` — PR is a hotfix (0 or 1) — value: `field_value_int`
+- `docs_only_flag` — PR only changes documentation (0 or 1) — value: `field_value_int`
+- `draft_pr_flag` — PR was created as draft (GitHub-specific, 0 or 1) — value: `field_value_int`
+- `diffstat_metadata` — Detailed file-level diff statistics — value: `field_value_str` (JSON)
 
 **Usage example**:
 ```sql
--- Get review depth score for a specific PR
-SELECT property_value 
-FROM git_pull_requests_ext 
-WHERE pr_id = 12345 
-  AND property_key = 'review_depth_score'
+-- Get review depth score (float, no cast needed)
+SELECT field_value_float
+FROM git_pull_requests_ext
+WHERE tenant_id = '...'
+  AND pr_id = 12345
+  AND field_id = 'review_depth_score'
   AND data_source = 'insight_github';
 
--- Get cycle time for all merged PRs in a repo
-SELECT pr.pr_number, pr.title, ext.property_value as cycle_time_hours
+-- Get cycle time for all merged PRs
+SELECT pr.pr_number, pr.title, ext.field_value_float AS cycle_time_hours
 FROM git_pull_requests pr
-JOIN git_pull_requests_ext ext 
-  ON pr.pr_id = ext.pr_id 
+JOIN git_pull_requests_ext ext
+  ON pr.tenant_id = ext.tenant_id
+  AND pr.pr_id = ext.pr_id
   AND pr.data_source = ext.data_source
-WHERE pr.project_key = 'MyOrg'
+WHERE pr.tenant_id = '...'
+  AND pr.project_key = 'MyOrg'
   AND pr.repo_slug = 'my-repo'
   AND pr.state = 'MERGED'
-  AND ext.property_key = 'cycle_time_hours';
+  AND ext.field_id = 'cycle_time_hours';
 
--- Find all hotfix PRs
+-- Find all hotfix PRs (integer flag, no cast)
 SELECT pr.pr_number, pr.title, pr.created_on
 FROM git_pull_requests pr
-JOIN git_pull_requests_ext ext 
-  ON pr.pr_id = ext.pr_id 
+JOIN git_pull_requests_ext ext
+  ON pr.tenant_id = ext.tenant_id
+  AND pr.pr_id = ext.pr_id
   AND pr.data_source = ext.data_source
-WHERE ext.property_key = 'hotfix_flag'
-  AND ext.property_value = '1';
+WHERE pr.tenant_id = '...'
+  AND ext.field_id = 'hotfix_flag'
+  AND ext.field_value_int = 1;
+
+-- Average AI percentage across merged PRs
+SELECT AVG(ext.field_value_float) AS avg_ai_pct
+FROM git_pull_requests pr
+JOIN git_pull_requests_ext ext
+  ON pr.tenant_id = ext.tenant_id
+  AND pr.pr_id = ext.pr_id
+  AND pr.data_source = ext.data_source
+WHERE pr.tenant_id = '...'
+  AND pr.state = 'MERGED'
+  AND ext.field_id = 'ai_generated_percentage';
 ```
 
 **Design rationale**: 
 - **Flexibility**: Add new PR metrics without schema changes
 - **Source-specific features**: Store platform-specific properties (e.g., GitHub's `draft` flag, Bitbucket's `task_count`) without NULLs in main table
 - **Computed metrics**: Store calculated metrics (review velocity, complexity) alongside raw data
-- **Efficiency**: Query only needed properties via index on `property_key`
+- **Efficiency**: Query only needed properties via index on `field_id`
 - **Versioning**: Track when each metric was computed via `collected_at`
 - **Evolution**: Metrics can be recalculated or redefined without data migration
 
@@ -510,6 +635,8 @@ WHERE ext.property_key = 'hotfix_flag'
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner |
 | `repo_slug` | String | REQUIRED | Repository name |
@@ -542,6 +669,8 @@ WHERE ext.property_key = 'hotfix_flag'
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner |
 | `repo_slug` | String | REQUIRED | Repository name |
@@ -576,6 +705,8 @@ WHERE ext.property_key = 'hotfix_flag'
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `project_key` | String | REQUIRED | Repository owner |
 | `repo_slug` | String | REQUIRED | Repository name |
@@ -597,6 +728,8 @@ WHERE ext.property_key = 'hotfix_flag'
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `external_ticket_id` | String | REQUIRED | Ticket ID extracted from text, e.g. `PROJ-123`, `#456` |
 | `project_key` | String | REQUIRED | Repository owner |
@@ -621,6 +754,8 @@ WHERE ext.property_key = 'hotfix_flag'
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
+| `tenant_id` | UUID | REQUIRED | Tenant identifier — injected by framework |
+| `source_instance_id` | String | REQUIRED | Source instance identifier |
 | `id` | Int64 | PRIMARY KEY | Auto-generated unique identifier |
 | `run_id` | String | REQUIRED | Unique run identifier (UUID) |
 | `started_at` | DateTime64(3) | REQUIRED | Run start timestamp |
@@ -746,6 +881,7 @@ WHERE ext.property_key = 'hotfix_flag'
 | `git_pull_requests_ext` | *(enrichment data)* | Merged into `class_pr_activity` during Gold transformation |
 | `git_tickets` | Cross-domain join → `class_task_tracker_activities.task_id` | Planned |
 | `git_commit_files` | *(granular detail)* | Available — no unified stream defined yet |
+| `git_commits_files_ext` | *(enrichment data)* | Merged into `class_commits` during Silver transformation alongside `git_commits_ext` |
 | `git_pull_requests_reviewers` | *(review analytics)* | Available — aggregated into PR-level metrics |
 | `git_pull_requests_comments` | *(review analytics)* | Available — aggregated into PR-level metrics |
 | `git_pull_requests_commits` | *(junction)* | Used internally for PR↔commit linkage |

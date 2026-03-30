@@ -92,6 +92,12 @@ With 2,000+ potential customers each using different tooling stacks, the connect
 | Semantic propagation | New fields reach dashboard metric catalog without manual work | `DataCatalogSync` | Schema sync triggered on connector registration; semantic metadata auto-populates Semantic Dictionary | Register new connector; verify metric appears in catalog |
 | Privacy by default | Content fields (message text, email body) never collected | `ConnectorManifest` + SDK | Fields must be explicitly declared to be collected; no wildcard field capture | Audit connector manifest; confirm no undeclared content fields present in Bronze |
 
+#### Architecture Decision Records
+
+| ADR | Decision | Status |
+|-----|----------|--------|
+| `cpt-insightspec-adr-connector-integration-protocol` | Use stdout JSON-per-line protocol for connector-to-system data delivery — language-agnostic, runner-mediated, backend-enforced integrity | proposed |
+
 ### 1.3 Architecture Layers
 
 ```
@@ -177,7 +183,7 @@ With 2,000+ potential customers each using different tooling stacks, the connect
 
 - [ ] `p1` - **ID**: `cpt-insightspec-principle-cn-bronze-isolation`
 
-All data must pass through Silver before reaching Gold. Bronze contains source-native identifiers — `person_id` has not been assigned. Workspace isolation (`workspace_id`) is guaranteed only at Silver and above. Gold queries read exclusively from `class_*` Silver tables.
+All data must pass through Silver before reaching Gold. Bronze contains source-native identifiers — `person_id` has not been assigned. Tenant isolation (`tenant_id UUID`) and workspace isolation (`workspace_id`) are guaranteed only at Silver and above. Gold queries read exclusively from `class_*` Silver tables and must always include a `tenant_id` predicate.
 
 Exception: org-level aggregates that cannot be attributed to an individual (e.g. org-level GitHub Copilot totals) still pass through a Silver table keyed by `(workspace_id, date)` — they do not bypass Silver.
 
@@ -199,6 +205,12 @@ Re-running a connector with the same cursor must produce the same Bronze rows. C
 
 Every `connector.yaml` carries a semantic version. Breaking schema changes (column removal, type narrowing, rename) require a major version bump. Minor additions (new optional columns) require a minor bump. Downstream Silver jobs validate that the connector version they depend on is within the declared compatible range.
 
+#### Multitenancy by Default
+
+- [ ] `p1` - **ID**: `cpt-insightspec-principle-cn-multitenancy`
+
+Every connector is configured for exactly one tenant. The `tenant_id` (UUID) is supplied at connector configuration time and is immutable for the lifetime of that connector configuration. **Every data table in the platform — Bronze, Silver, Gold, extension (`_ext`), and run-log (`collection_runs`) tables — must carry a `tenant_id UUID` column.** The framework injects this column on every written row; connector authors never populate it manually. Row-level queries at Silver and Gold must always filter by `tenant_id`; cross-tenant reads are prohibited outside of platform-level admin tooling. This guarantees that a single ClickHouse cluster can safely host data from multiple customers without logical data leakage.
+
 #### Error Isolation
 
 - [ ] `p1` - **ID**: `cpt-insightspec-principle-cn-error-isolation`
@@ -219,6 +231,12 @@ The Bronze/Silver boundary is the automation boundary. Bronze is a structural pr
 
 AI may draft Silver mapping proposals — field-to-column candidates, enum clustering, unit detection, identity key suggestions. These proposals are never applied without human review and approval in the Connector Onboarding UI. The final Silver contract must have every field mapped, every enum resolved, and every identity rule declared by a human. AI eliminates the blank-page problem; it does not eliminate authorship.
 
+#### Stable `tenant_id`
+
+- [ ] `p1` - **ID**: `cpt-insightspec-constraint-cn-stable-tenant-id`
+
+Every connector configuration carries a `tenant_id` (UUID) that identifies the customer tenant for which data is being collected. This value is set once at connector configuration time and must never change for the lifetime of that configuration. Changing `tenant_id` after production data has been written orphans all historical rows under the old UUID and breaks all tenant-scoped queries. It must be treated as immutable once a connector is active.
+
 #### Stable `source_instance_id`
 
 - [ ] `p1` - **ID**: `cpt-insightspec-constraint-cn-stable-instance-id`
@@ -235,6 +253,7 @@ Every Bronze row carries `source_instance_id` — the human-readable, stable ide
 
 | Concept | Description |
 |---|---|
+| **Tenant** | A customer organisation using the platform. Identified by `tenant_id` (UUID). All data tables are partitioned by `tenant_id`; every connector is bound to exactly one tenant |
 | **Connector** | A configured, deployed source adapter. Identified by `(connector_id, source_instance_id, workspace_id)` |
 | **Source Adapter** | Code implementing the source-specific API client and extraction logic; extends `BaseConnector` |
 | **Connector Manifest** (`connector.yaml`) | Declarative contract: identity, auth type, endpoints, pagination, capabilities, rate limits |
@@ -650,6 +669,7 @@ Every Bronze table is generated from the connector manifest's field declarations
 ```sql
 CREATE TABLE IF NOT EXISTS {source}_{entity}
 (
+    tenant_id           UUID,
     source_instance_id  String,
     -- connector-declared fields (names and types from manifest):
     {field_name}        {ClickHouse_type},
@@ -660,7 +680,7 @@ CREATE TABLE IF NOT EXISTS {source}_{entity}
     _version            UInt64
 )
 ENGINE = ReplacingMergeTree(_version)
-ORDER BY ({primary_key_fields}, source_instance_id)
+ORDER BY (tenant_id, {primary_key_fields}, source_instance_id)
 SETTINGS index_granularity = 8192;
 ```
 
@@ -668,6 +688,7 @@ SETTINGS index_granularity = 8192;
 
 | Column | Type | Value |
 |---|---|---|
+| `tenant_id` | `UUID` | Tenant UUID supplied at connector configuration time; set by framework on every row |
 | `collected_at` | `DateTime64(3)` | Timestamp of the collection run; set by framework at write time |
 | `data_source` | `String` | Connector's canonical `id` from manifest (e.g. `insight_youtrack`) |
 | `source_instance_id` | `String` | Runtime instance identifier (e.g. `youtrack-acme-prod`) |
@@ -692,19 +713,27 @@ SETTINGS index_granularity = 8192;
 ```sql
 CREATE TABLE IF NOT EXISTS {source}_{entity}_ext
 (
-    source_instance_id  String,
-    entity_id           String,
-    field_id            String,
-    field_name          String,
-    field_value         String,
-    value_type          String,   -- 'string' | 'number' | 'user' | 'enum' | 'json'
-    collected_at        DateTime64(3),
-    data_source         String,
-    _version            UInt64
+    tenant_id             UUID,
+    source_instance_id    String,
+    entity_id             String,
+    field_id              String,
+    field_name            String,
+    field_value_str       Nullable(String),    -- string / enum / json / user values
+    field_value_int       Nullable(Int64),     -- integer and boolean values (0/1 for bool)
+    field_value_float     Nullable(Float64),   -- floating-point numeric values
+    collected_at          DateTime64(3),
+    data_source           String,
+    _version              UInt64
 )
 ENGINE = ReplacingMergeTree(_version)
-ORDER BY (source_instance_id, entity_id, field_id);
+ORDER BY (tenant_id, source_instance_id, entity_id, field_id);
 ```
+
+**Value column rules**: A connector must populate at least one of the three value columns; it may populate more than one if the value is representable in multiple types (e.g. an integer is also stored in `field_value_float` when downstream float aggregation is expected). Unpopulated columns are `NULL`.
+
+- `field_value_str` — all string, enum, JSON, and user-reference values; also used for complex values serialised as JSON.
+- `field_value_int` — integers and booleans (`0` / `1`). Use this for any flag or count field to avoid casting at query time.
+- `field_value_float` — fractional numeric values (ratios, scores, percentages). Integer values that are also queried as floats may be stored here in addition to `field_value_int`.
 
 Schema is identical across all `_ext` tables; declaring `has_custom_fields: true` in the manifest is the only connector-author action required.
 
@@ -713,6 +742,7 @@ Schema is identical across all `_ext` tables; declaring `has_custom_fields: true
 ```sql
 CREATE TABLE IF NOT EXISTS {source}_collection_runs
 (
+    tenant_id       UUID,
     run_id          String,
     started_at      DateTime64(3),
     completed_at    DateTime64(3),
@@ -725,7 +755,7 @@ CREATE TABLE IF NOT EXISTS {source}_collection_runs
     ...
 )
 ENGINE = MergeTree()
-ORDER BY (started_at, run_id);
+ORDER BY (tenant_id, started_at, run_id);
 ```
 
 Common core is 100% generated; per-entity count field names are declared as additive metadata in the manifest.
@@ -736,6 +766,7 @@ Silver table schemas are defined by the UnifierRegistry domain YAML. All Silver 
 
 | Column | Type | Notes |
 |---|---|---|
+| `tenant_id` | `UUID` | Tenant identifier; propagated from Bronze by the Silver step 1 ETL job; mandatory on every row |
 | `source` | `String` | Source system name (e.g. `youtrack`, `github`) |
 | `source_instance_id` | `String` | Instance identifier |
 | `person_id` | `String NULL` | Canonical person ID from Identity Manager (NULL until Silver step 2) |
@@ -831,6 +862,9 @@ connector:
   source_type: ""                  # git | task | communication | hr | ai | crm | quality
 
   config:
+    tenant_id: ""                  # UUID of the tenant this connector is collecting data for;
+                                   # set at configuration time; immutable once data exists;
+                                   # injected by the framework into every written row
     required_env_vars: []          # credential and instance URL vars
     optional_env_vars: []
 
@@ -940,13 +974,17 @@ Framework reads cursor from store → injects → collects → writes cursor on 
 **Bronze** — `_ext` key-value table (one per entity type with custom fields):
 
 ```
-source_instance_id  String   -- which instance
-entity_id           String   -- parent entity key
-field_id            String   -- machine ID from source API
-field_name          String   -- display name (e.g. "Squad", "Customer")
-field_value         String   -- all values stored as string; JSON for complex
-value_type          String   -- string | number | user | enum | json
+tenant_id             UUID     -- tenant scope
+source_instance_id    String   -- which instance
+entity_id             String   -- parent entity key
+field_id              String   -- machine ID from source API
+field_name            String   -- display name (e.g. "Squad", "Customer")
+field_value_str       String?  -- string / enum / json / user values; NULL when not applicable
+field_value_int       Int64?   -- integer and boolean (0/1) values; NULL when not applicable
+field_value_float     Float64? -- fractional numeric values; NULL when not applicable
 ```
+
+At least one of the three value columns must be non-NULL per row. This split eliminates runtime type casting: integer aggregations (SUM, AVG, COUNT) operate directly on `field_value_int` or `field_value_float` without error-prone string-to-number coercions.
 
 Schema is identical across all `_ext` tables. Generated on `has_custom_fields: true` in manifest.
 
