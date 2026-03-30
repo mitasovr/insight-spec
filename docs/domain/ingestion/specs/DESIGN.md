@@ -660,7 +660,7 @@ All services run inside a Kind K8s cluster (`airbyte-abctl`):
 - ClickHouse deployed via K8s manifests (Deployment + Service + PVC + ConfigMap)
 - dbt runs as Argo container steps (`ghcr.io/dbt-labs/dbt-clickhouse`)
 
-KUBECONFIG: `/Users/roman/.airbyte/abctl/abctl.kubeconfig`
+KUBECONFIG: `~/.kube/kind-ingestion`
 
 Startup: `./up.sh` — installs Airbyte, deploys ClickHouse, installs Argo, applies WorkflowTemplates, initializes connections.
 

@@ -11,6 +11,12 @@ echo "=== Resolving Airbyte environment ==="
 source ./scripts/resolve-airbyte-env.sh
 export AIRBYTE_TOKEN AIRBYTE_CLIENT_ID AIRBYTE_CLIENT_SECRET WORKSPACE_ID
 
+echo "=== Creating dbt databases ==="
+kubectl exec -n data deploy/clickhouse -- clickhouse-client --password clickhouse \
+  --query "CREATE DATABASE IF NOT EXISTS staging" 2>/dev/null
+kubectl exec -n data deploy/clickhouse -- clickhouse-client --password clickhouse \
+  --query "CREATE DATABASE IF NOT EXISTS silver" 2>/dev/null
+
 echo "=== Registering connectors ==="
 ./scripts/upload-manifests.sh --all
 

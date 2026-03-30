@@ -5,7 +5,15 @@ ingestion:
       type: clickhouse
       host: localhost
       port: 8123
-      schema: silver
+      schema: default
+      user: default
+      password: "clickhouse"
+      secure: false
+    k8s:
+      type: clickhouse
+      host: clickhouse.data.svc.cluster.local
+      port: 8123
+      schema: default
       user: default
       password: "clickhouse"
       secure: false

@@ -112,7 +112,7 @@ if not dest_id:
         "connectionConfiguration": {
             "host": dest_config.get("host", "clickhouse.data.svc.cluster.local"),
             "port": str(dest_config.get("port", 8123)),
-            "database": f"bronze_{tenant_id}",
+            "database": "default",
             "username": dest_config.get("username", "default"),
             "password": dest_config.get("password", "clickhouse"),
             "protocol": "http",
@@ -126,10 +126,6 @@ if not dest_id:
         sys.exit(1)
 
 state["destination_id"] = dest_id
-
-# --- Create ClickHouse database ---
-print(f"  Creating database: bronze_{tenant_id}")
-os.system(f'kubectl exec -n data deploy/clickhouse -- clickhouse-client --password clickhouse --query "CREATE DATABASE IF NOT EXISTS bronze_{tenant_id}" 2>/dev/null')
 
 # --- Per-connector sources + connections ---
 state.setdefault("connectors", {})
@@ -154,6 +150,11 @@ for connector_name, creds in tenant.get("connectors", {}).items():
         descriptor = yaml.safe_load(f)
 
     conn_state = state["connectors"].setdefault(connector_name, {})
+
+    # Create ClickHouse database for this connector
+    db_name = descriptor.get("connection", {}).get("namespace", f"bronze_{connector_name}")
+    print(f"    Creating database: {db_name}")
+    os.system(f'kubectl exec -n data deploy/clickhouse -- clickhouse-client --password clickhouse --query "CREATE DATABASE IF NOT EXISTS {db_name}" 2>/dev/null')
 
     # Find source definition ID
     def_id = conn_state.get("definition_id")
@@ -201,7 +202,7 @@ for connector_name, creds in tenant.get("connectors", {}).items():
     connection_id = conn_state.get("connection_id")
 
     if not connection_id:
-        namespace = connection_config.get("namespace", f"bronze_{tenant_id}").replace("${tenant_id}", tenant_id)
+        namespace = connection_config.get("namespace", f"bronze_{connector_name}")
         streams = connection_config.get("streams", [])
 
         # Build catalog for connection
