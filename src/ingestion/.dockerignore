@@ -1,4 +1,4 @@
-connections/.state/
+connections/.airbyte-state.yaml
 .env.local
 *.env.local
 tools/declarative-connector/

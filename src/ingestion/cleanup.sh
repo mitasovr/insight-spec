@@ -20,8 +20,8 @@ fi
 # Kill port-forwards
 pkill -f 'port-forward.*airbyte' 2>/dev/null || true
 
-# Clean connection state
-rm -rf connections/.state 2>/dev/null || true
+# Clean Airbyte state
+rm -f connections/.airbyte-state.yaml 2>/dev/null || true
 
 # Clean generated workflows
 rm -rf workflows/example-tenant 2>/dev/null || true

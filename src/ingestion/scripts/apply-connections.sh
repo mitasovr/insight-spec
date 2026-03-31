@@ -18,10 +18,19 @@ apply_tenant() {
   local tenant_config="$1"
 
   python3 - "$tenant_config" "$CONNECTORS_DIR" "$CONNECTIONS_DIR" \
-    "${AIRBYTE_API:-http://localhost:8000}" "$AIRBYTE_TOKEN" "$WORKSPACE_ID" <<'PYTHON'
+    "${AIRBYTE_API:-http://localhost:8000}" "$AIRBYTE_TOKEN" "$WORKSPACE_ID" \
+    "${CONNECTIONS_DIR}/.airbyte-state.yaml" <<'PYTHON'
 import sys, os, json, yaml, urllib.request, urllib.error, pathlib
 
-tenant_config_path, connectors_dir, connections_dir, airbyte_url, token, workspace_id = sys.argv[1:7]
+tenant_config_path, connectors_dir, connections_dir, airbyte_url, token, workspace_id, state_path = sys.argv[1:8]
+
+# Load state
+state = yaml.safe_load(open(state_path)) if os.path.exists(state_path) else {}
+if not state: state = {}
+
+def save_state():
+    with open(state_path, "w") as f:
+        yaml.dump(state, f, default_flow_style=False, sort_keys=False)
 state_dir = os.path.join(connections_dir, ".state")
 os.makedirs(state_dir, exist_ok=True)
 
@@ -89,6 +98,7 @@ state["clickhouse_definition_id"] = ch_def_id
 
 # --- Per-connector sources + connections ---
 state.setdefault("connectors", {})
+conn_state_all = state["connectors"]
 
 for connector_name, creds in tenant.get("connectors", {}).items():
     print(f"  Connector: {connector_name}")
@@ -150,23 +160,25 @@ for connector_name, creds in tenant.get("connectors", {}).items():
             continue
     conn_state["destination_id"] = dest_id
 
-    # Find source definition ID (prefer exact name match, use latest if duplicates)
+    # Find source definition ID — from state first, then API fallback
     old_def_id = conn_state.get("definition_id")
-    def_id = None
-    defs = api("POST", "/api/v1/source_definitions/list", {"workspaceId": workspace_id})
-    if defs:
-        # Exact match — collect all, use latest (last in list)
-        exact = [d["sourceDefinitionId"] for d in defs.get("sourceDefinitions", []) if d["name"] == connector_name]
-        if exact:
-            def_id = exact[-1]  # latest
-            if len(exact) > 1:
-                print(f"    NOTE: {len(exact)} definitions named '{connector_name}', using latest: {def_id}")
-        else:
-            # Fallback to case-insensitive
-            for d in defs.get("sourceDefinitions", []):
-                if d["name"].lower() == connector_name.lower():
-                    def_id = d["sourceDefinitionId"]
-                    break
+    def_id = state.get("definitions", {}).get(connector_name)
+    if def_id:
+        print(f"    Definition from state: {def_id[:12]}...")
+    else:
+        # Fallback: search API (exact name match, latest if duplicates)
+        defs = api("POST", "/api/v1/source_definitions/list", {"workspaceId": workspace_id})
+        if defs:
+            exact = [d["sourceDefinitionId"] for d in defs.get("sourceDefinitions", []) if d["name"] == connector_name]
+            if exact:
+                def_id = exact[-1]
+                if len(exact) > 1:
+                    print(f"    NOTE: {len(exact)} definitions named '{connector_name}', using latest")
+            else:
+                for d in defs.get("sourceDefinitions", []):
+                    if d["name"].lower() == connector_name.lower():
+                        def_id = d["sourceDefinitionId"]
+                        break
     if not def_id:
         print(f"    SKIP: source definition not found for {connector_name} (run upload-manifests first)")
         continue
@@ -282,16 +294,23 @@ for connector_name, creds in tenant.get("connectors", {}).items():
         conn_state["connection_id"] = connection_id
         print(f"    Connection: {connection_id}")
 
-# Save state to file
+# Save tenant state into .airbyte-state.yaml
 state["workspace_id"] = workspace_id
-with open(state_path, "w") as f:
-    yaml.dump(state, f, default_flow_style=False)
+for cn, cs in conn_state_all.items():
+    for key in ("destination_id", "source_id", "connection_id"):
+        if key in cs:
+            section = key.replace("_id", "s")  # destination_id → destinations
+            state.setdefault("tenants", {}).setdefault(tenant_id, {}).setdefault(section, {})[cn] = cs[key]
+    if "definition_id" in cs:
+        state.setdefault("definitions", {})[cn] = cs["definition_id"]
 
-# Persist state as K8s ConfigMap (survives pod restarts)
-cm_name = f"connection-state-{config_basename}"
-os.system(f'kubectl create configmap {cm_name} --from-file=state.yaml={state_path} -n data --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null')
+save_state()
 
-print(f"  State saved: {state_path} + configmap/{cm_name}")
+# Sync ConfigMap if in-cluster
+if os.path.exists("/var/run/secrets/kubernetes.io/serviceaccount/token"):
+    os.system(f'kubectl create configmap airbyte-state --from-file=state.yaml={state_path} -n data --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null')
+
+print(f"  State saved: {state_path}")
 PYTHON
 }
 

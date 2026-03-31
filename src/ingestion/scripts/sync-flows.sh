@@ -14,21 +14,12 @@ CONNECTIONS_DIR="./connections"
 echo "  Applying WorkflowTemplates..."
 kubectl apply -f "${WORKFLOWS_DIR}/templates/"
 
-# --- Get connection_id from state ---
+# --- Get connection_id from Airbyte state ---
+source "${SCRIPT_DIR}/airbyte-state.sh"
+
 get_connection_id() {
   local tenant="$1" connector="$2"
-  local state_file="${CONNECTIONS_DIR}/.state/${tenant}.yaml"
-
-  # Try local file first
-  if [[ -f "$state_file" ]]; then
-    yq -r ".connectors.${connector}.connection_id" "$state_file" 2>/dev/null | grep -v null
-    return
-  fi
-
-  # Fall back to K8s ConfigMap
-  local cm_name="connection-state-${tenant}"
-  kubectl get configmap "$cm_name" -n data -o jsonpath='{.data.state\.yaml}' 2>/dev/null \
-    | yq -r ".connectors.${connector}.connection_id" 2>/dev/null | grep -v null
+  state_get "tenants.${tenant}.connections.${connector}"
 }
 
 # --- Generate and apply CronWorkflows for a tenant ---

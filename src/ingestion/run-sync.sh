@@ -9,15 +9,10 @@ TENANT="${2:?Usage: $0 <connector> <tenant_id>}"
 
 export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/kind-ingestion}"
 
-# Read connection_id from local state or K8s ConfigMap
-STATE_FILE="connections/.state/${TENANT}.yaml"
-if [[ -f "$STATE_FILE" ]]; then
-  CONNECTION_ID=$(yq -r ".connectors.${CONNECTOR}.connection_id // empty" "$STATE_FILE")
-else
-  CONNECTION_ID=$(kubectl get configmap "connection-state-${TENANT}" -n data -o jsonpath='{.data.state\.yaml}' 2>/dev/null \
-    | yq -r ".connectors.${CONNECTOR}.connection_id // empty" 2>/dev/null)
-fi
-[[ -n "$CONNECTION_ID" ]] || { echo "ERROR: no connection_id for connector '$CONNECTOR' tenant '$TENANT'" >&2; exit 1; }
+# Read connection_id from Airbyte state
+source ./scripts/airbyte-state.sh
+CONNECTION_ID=$(state_get "tenants.${TENANT}.connections.${CONNECTOR}")
+[[ -n "$CONNECTION_ID" ]] || { echo "ERROR: no connection_id for connector '$CONNECTOR' tenant '$TENANT'. Run update-connections.sh first." >&2; exit 1; }
 
 DBT_SELECT=$(find connectors -name descriptor.yaml -exec grep -l "name: ${CONNECTOR}" {} \; | head -1 | xargs yq -r '.dbt_select // "+tag:silver"' 2>/dev/null)
 

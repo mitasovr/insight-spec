@@ -25,8 +25,10 @@ Registers connector in Airbyte, creates connections, and sets up Argo workflows.
 This updates the existing definition in Airbyte in-place (same definition ID).
 If the connector is new, it creates a builder project and publishes a new definition.
 
-**Important**: `upload-manifests.sh` updates definitions in-place. It does NOT create
-duplicate definitions. The definition ID stays the same across updates.
+**Important**:
+- `upload-manifests.sh` updates definitions in-place — no duplicate IDs
+- After upload, definition ID is saved to `connections/.airbyte-state.yaml`
+- All subsequent scripts read IDs from state, not by name lookup
 
 ## Phase 2: Create/Update Connections
 
@@ -44,11 +46,22 @@ This script is idempotent — it handles both creation and updates:
 
 | Pitfall | How handled |
 |---------|-------------|
-| Duplicate definitions | Uses latest definition when multiple exist with same name |
-| Stale schema after manifest update | Detects definition change, recreates source → fresh discover |
+| Duplicate definitions | Fixed: upload-manifests.sh updates in-place (same ID) |
+| Stale schema after manifest update | Detects definition change in state, recreates source → fresh discover |
 | Missing cursor field in schema | Discover from updated definition includes all fields |
 | `full_refresh` + `overwrite` = NPE | Always uses `append_dedup` for all streams |
-| Built-in vs custom name collision | Exact name match first, then case-insensitive fallback |
+| Name collision (built-in vs custom) | Eliminated: scripts use definition ID from state, not name lookup |
+
+### Airbyte State
+
+All resource IDs are stored in `connections/.airbyte-state.yaml` (gitignored).
+Scripts read/write this file automatically. If state gets corrupted:
+
+```bash
+./scripts/sync-airbyte-state.sh   # re-fetch all IDs from Airbyte API
+```
+
+On host: state is a YAML file. In K8s: state is a ConfigMap `airbyte-state`.
 
 ## Phase 3: Create Workflows
 

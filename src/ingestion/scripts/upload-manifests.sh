@@ -14,6 +14,8 @@ fi
 AIRBYTE_URL="${AIRBYTE_API:-http://localhost:8000}"
 CONNECTORS_DIR="./connectors"
 
+source ./scripts/airbyte-state.sh
+
 # Use Python for all Airbyte API calls — shell interpolation breaks JSON with large manifests
 upload_connector() {
   local connector="$1"
@@ -29,7 +31,8 @@ upload_connector() {
   local name
   name=$(yq -r '.name' "${descriptor_path}" 2>/dev/null || basename "$connector")
 
-  python3 - "$AIRBYTE_URL" "$AIRBYTE_TOKEN" "$WORKSPACE_ID" "$name" "$manifest_path" <<'PYTHON'
+  local output
+  output=$(python3 - "$AIRBYTE_URL" "$AIRBYTE_TOKEN" "$WORKSPACE_ID" "$name" "$manifest_path" <<'PYTHON'
 import sys, json, yaml, urllib.request
 
 airbyte_url, token, workspace_id, name, manifest_path = sys.argv[1:6]
@@ -88,6 +91,7 @@ if existing_id:
         def_id = dm.get("sourceDefinitionId") if dm else None
     if def_id:
         print(f"  Updated: definition {def_id}")
+        print(f"  DEF_ID:{def_id}")
     else:
         print(f"  Updated draft+active manifest (definition ID in project)")
 else:
@@ -117,11 +121,21 @@ else:
     })
     if pub_result and "sourceDefinitionId" in pub_result:
         print(f"  Published: definition {pub_result['sourceDefinitionId']}")
+        print(f"  DEF_ID:{pub_result['sourceDefinitionId']}")
     else:
         print(f"  WARN: publish response: {str(pub_result)[:200]}", file=sys.stderr)
 
 print(f"  Done: {name}")
 PYTHON
+)
+  echo "$output"
+
+  # Save definition ID to state
+  local def_id
+  def_id=$(echo "$output" | grep "^  DEF_ID:" | tail -1 | cut -d: -f2)
+  if [[ -n "$def_id" ]]; then
+    state_set "definitions.${name}" "$def_id"
+  fi
 }
 
 if [[ "${1:-}" == "--all" ]]; then

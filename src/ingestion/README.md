@@ -157,15 +157,15 @@ src/ingestion/
 │       ├── connector.yaml           #   Airbyte declarative manifest
 │       ├── descriptor.yaml          #   Schedule, streams, dbt_select
 │       ├── credentials.yaml.example #   Credential template (tracked)
-│       ├── .env.local               #   Test credentials (gitignored)
+│       ├── schemas/                 #   Generated JSON schemas (gitignored)
 │       └── dbt/
-│           ├── to_comms_events.sql  #   Bronze → Silver model
-│           └── schema.yml           #   Source + tests
+│           ├── m365__comms_events.sql  # Bronze → Staging model
+│           └── schema.yml              # Source + tests
 │
-├── connections/                     # Tenant credential files
+├── connections/                     # Tenant configs + Airbyte state
 │   ├── example-tenant.yaml.example  #   Template (tracked)
 │   ├── example-tenant.yaml          #   Real credentials (gitignored)
-│   └── .state/                      #   Generated IDs (gitignored)
+│   └── .airbyte-state.yaml          #   Airbyte IDs registry (gitignored, auto-generated)
 │
 ├── dbt/                             # Shared dbt project
 │   ├── dbt_project.yml
@@ -190,6 +190,8 @@ src/ingestion/
 ├── scripts/                         # Internal scripts (run inside toolbox)
 │   ├── init.sh                      #   Full initialization
 │   ├── resolve-airbyte-env.sh       #   JWT token + workspace resolution
+│   ├── airbyte-state.sh             #   State library (state_get/state_set)
+│   ├── sync-airbyte-state.sh        #   Sync state from Airbyte API
 │   ├── upload-manifests.sh          #   Register connectors via API
 │   ├── apply-connections.sh         #   Create sources/destinations/connections
 │   ├── sync-flows.sh               #   Generate + apply CronWorkflows
@@ -202,6 +204,42 @@ src/ingestion/
     └── declarative-connector/       # Local connector debugging
         └── source.sh               #   check / discover / read
 ```
+
+## Airbyte State
+
+All Airbyte resource IDs (definitions, sources, destinations, connections) are tracked in
+`connections/.airbyte-state.yaml`. This file is auto-generated and gitignored — it's specific
+to the current Airbyte instance.
+
+```yaml
+# connections/.airbyte-state.yaml (auto-generated)
+workspace_id: "8564ee19-..."
+definitions:
+  m365: "f8b1f832-..."
+  zoom: "1227c334-..."
+tenants:
+  example-tenant:
+    destinations:
+      m365: "09e5fc84-..."
+      zoom: "cb676fc0-..."
+    sources:
+      m365: "591af227-..."
+      zoom: "73dab641-..."
+    connections:
+      m365: "b4a78d7b-..."
+      zoom: "d04a508a-..."
+```
+
+Scripts read/write this state automatically. If state gets out of sync:
+
+```bash
+./scripts/sync-airbyte-state.sh    # re-fetch all IDs from Airbyte API
+```
+
+**Storage backend**:
+- **Local (host)**: file `connections/.airbyte-state.yaml`
+- **In-cluster (K8s)**: ConfigMap `airbyte-state` in namespace `data`
+- Scripts auto-detect the backend
 
 ## Adding a New Connector
 
