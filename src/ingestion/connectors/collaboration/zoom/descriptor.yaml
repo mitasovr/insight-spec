@@ -15,8 +15,6 @@ connection:
       sync_mode: incremental_append
     - name: participants
       sync_mode: incremental_append
-    - name: message_activities
-      sync_mode: full_refresh_overwrite
 
 silver_targets:
   - class_comms_events

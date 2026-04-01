@@ -7,7 +7,6 @@ sources:
       - name: users
       - name: meetings
       - name: participants
-      - name: message_activities
 
 models:
   - name: zoom__comms_events

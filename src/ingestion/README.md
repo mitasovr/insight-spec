@@ -141,6 +141,56 @@ After `./up.sh`:
 | Argo UI | http://localhost:30500 | No auth (local) |
 | ClickHouse | http://localhost:30123 | `default` / `clickhouse` |
 
+### ClickHouse Credentials
+
+Credentials are stored in a ConfigMap and referenced by destination configs.
+
+**Local (Kind):** defined in `k8s/clickhouse/configmap.yaml` (`default.xml` → `<users><default><password>`).
+
+**Any environment:** read from the running cluster:
+
+```bash
+# From ConfigMap
+kubectl get configmap clickhouse-config -n data -o jsonpath='{.data.default\.xml}' | grep -oP '(?<=<password>).*(?=</password>)'
+
+# From tenant config
+yq '.destination' connections/<tenant>.yaml
+
+# Quick test
+kubectl exec -n data deploy/clickhouse -- clickhouse-client --password clickhouse --query "SELECT currentUser()"
+```
+
+### Airbyte Credentials
+
+**Local (Kind):** API at `http://localhost:8000`. Token and workspace ID are resolved automatically.
+
+**Any environment:**
+
+```bash
+# Sets AIRBYTE_API, AIRBYTE_TOKEN, WORKSPACE_ID
+source ./scripts/resolve-airbyte-env.sh
+
+# Quick test
+curl -s -H "Authorization: Bearer $AIRBYTE_TOKEN" "$AIRBYTE_API/api/v1/health"
+```
+
+In-cluster API address: `http://airbyte-airbyte-server-svc.airbyte.svc.cluster.local:8001`.
+
+### Argo Credentials
+
+**Local (Kind):** UI at `http://localhost:30500`, no authentication.
+
+**Any environment:**
+
+```bash
+# Port-forward to access Argo UI
+kubectl -n argo port-forward svc/argo-server 2746:2746
+# Then open http://localhost:2746
+
+# List recent workflows
+kubectl get workflows -n argo --sort-by=.metadata.creationTimestamp --no-headers | tail -5
+```
+
 ## Project Structure
 
 ```
