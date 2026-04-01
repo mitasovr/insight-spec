@@ -39,6 +39,8 @@ date: 2026-03-30
   - [4.12 Development Workflow](#412-development-workflow)
   - [4.13 dbt Model Rules](#413-dbt-model-rules)
   - [4.14 Common Pitfalls](#414-common-pitfalls)
+  - [4.15 Deployment Pitfalls](#415-deployment-pitfalls)
+  - [4.16 Correct Deployment Order](#416-correct-deployment-order)
 - [5. Traceability](#5-traceability)
   - [Requirement Coverage](#requirement-coverage)
 
