@@ -1,30 +1,40 @@
 # Connector Domain
 
-The Connector Framework is the data ingestion subsystem of the Insight platform. It collects raw data from source systems and delivers it into the Medallion Architecture (Bronze → Silver → Gold) where it becomes analytically useful.
+Insight Connector development: package structure, manifest authoring, dbt transformations, local debugging.
+
+An **Insight Connector** is a complete pipeline package: Airbyte Connector + descriptor + dbt transformations + credential template.
 
 ## Documents
 
 | Document | Description |
 |---|---|
-| [`specs/DESIGN.md`](specs/DESIGN.md) | Framework architecture: Medallion layers, connector contract, BaseConnector, UnifierRegistry, automation boundary, AI-assisted onboarding, open questions |
+| [`specs/DESIGN.md`](specs/DESIGN.md) | Connector specification: mandatory fields, manifest rules, CDK guide, schema, dbt, deployment |
+| [`specs/PRD.md`](specs/PRD.md) | Requirements: connector framework, Bronze/Silver rules, packaging, RLS |
+| [`specs/ADR/0001-connector-integration-protocol.md`](specs/ADR/0001-connector-integration-protocol.md) | Historical: stdout JSON protocol decision (superseded by Airbyte Protocol) |
 
-## Scope
+## Implementation
 
-This domain covers:
-- Connector Framework (BaseConnector, manifest contract, framework-owned mechanics)
-- Medallion Architecture layers and their responsibilities (Bronze / Silver step 1 / Silver step 2 / Gold)
-- Unifier schema and semantic metadata propagation
-- Automation boundary — what can and cannot be generated
-- Connector Onboarding UI and AI-assisted Silver mapping
-- Custom fields pattern (`_ext` tables → Silver `Map` columns)
-- Orchestration integration (AirByte / Dagster)
-- Connector SDK and authorship tiers (first-party / community / self-service)
+Source code: [`src/ingestion/`](../../../src/ingestion/)
 
-Out of scope: per-source Bronze table schemas, per-source API details, connector-specific field mappings → see `docs/components/connectors/`.
+```
+src/ingestion/
+  connectors/{category}/{name}/     # Insight Connector packages
+    connector.yaml                  #   Airbyte declarative manifest
+    descriptor.yaml                 #   Metadata: schedule, streams, dbt_select
+    credentials.yaml.example        #   Credential template (tracked)
+    configured_catalog.json         #   For local debugging (optional)
+    schemas/                        #   Generated JSON schemas per stream
+    dbt/                            #   Bronze → Silver transforms
+  connections/                      #   Tenant configs (gitignored)
+  tools/declarative-connector/      #   Local debugging: source.sh
+  scripts/
+    generate-schema.sh              #   Extract schemas from discover
+    generate-catalog.sh             #   Generate configured_catalog.json
+    upload-manifests.sh             #   Register connectors in Airbyte
+```
 
-## Source Documents (Inbox)
+## Related Domains
 
-The `specs/DESIGN.md` synthesizes the following inbox documents:
-- `inbox/architecture/CONNECTORS_ARCHITECTURE.md` — connector ecosystem, contract, unifier, semantic metadata
-- `inbox/architecture/CONNECTOR_AUTOMATION.md` — automation boundary, SDK design, AI-assisted onboarding
-- `inbox/CONNECTORS_REFERENCE.md` — §How Data Flows, §Custom Fields Pattern, §Open Questions (architecture sections only)
+| Domain | Relationship |
+|---|---|
+| [Ingestion](../ingestion/) | Parent: orchestration, deployment, pipeline |

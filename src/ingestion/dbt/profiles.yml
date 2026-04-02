@@ -1,0 +1,19 @@
+ingestion:
+  target: local
+  outputs:
+    local:
+      type: clickhouse
+      host: localhost
+      port: 30123
+      schema: default
+      user: default
+      password: "clickhouse"
+      secure: false
+    k8s:
+      type: clickhouse
+      host: clickhouse.data.svc.cluster.local
+      port: 8123
+      schema: default
+      user: default
+      password: "clickhouse"
+      secure: false

@@ -136,7 +136,7 @@ docs/
 │   │   ├── ui-design/            ← Figma
 │   │   └── testing/              ← Allure TestOps
 │   │
-│   ├── connectors-orchestrator/  ← connector orchestration layer specs
+│   ├── orchestrator/             ← connector orchestration layer specs
 │   ├── backend/                  ← REST API server specs
 │   └── frontend/                 ← SPA specs
 │
@@ -169,7 +169,7 @@ Incoming documents pending triage and integration into `docs/`. Not yet canonica
 | `architecture/IDENTITY_RESOLUTION_V*.md` + `IDENTITY_RESOLUTION.md` | **Synthesized** → `docs/domain/identity-resolution/specs/DESIGN.md` | Complete |
 | `architecture/PRODUCT_SPECIFICATION.md` | Draft | `docs/domain/` or root product spec |
 | `architecture/permissions/` | Draft ADRs | `docs/components/backend/specs/ADR/` |
-| `airbyte-declarative-standalone/` | Prototype | Connector implementation reference in `src/connectors/` |
+| `airbyte-declarative-standalone/` | **Migrated** | `docs/components/connectors/collaboration/m365/` |
 | `stats/backend/` | Draft ADRs | `docs/components/backend/specs/ADR/` |
 | `stats/frontend/` | Draft | `docs/components/frontend/specs/` |
 | `streams/` | Draft schemas | `docs/components/connectors/` — per-source stream definitions |

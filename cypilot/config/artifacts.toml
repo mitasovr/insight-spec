@@ -68,6 +68,16 @@ path = "docs/components/connectors/git/github.md"
 name = "GitHub Connector Specification"
 
 [[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/connectors/git/github/specs/PRD.md"
+name = "GitHub Connector PRD"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/components/connectors/git/github/specs/DESIGN.md"
+name = "GitHub Connector Design"
+
+[[systems.artifacts]]
 kind = "DESIGN"
 path = "docs/components/connectors/git/bitbucket.md"
 name = "Bitbucket Connector Specification"
@@ -98,6 +108,16 @@ path = "docs/components/connectors/hr-directory/bamboohr.md"
 name = "BambooHR Connector Specification"
 
 [[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/connectors/crm/salesforce/specs/PRD.md"
+name = "Salesforce Connector PRD"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/components/connectors/crm/salesforce/specs/DESIGN.md"
+name = "Salesforce Connector Design"
+
+[[systems.artifacts]]
 kind = "DESIGN"
 path = "docs/components/connectors/hr-directory/workday.md"
 name = "Workday Connector Specification"
@@ -118,9 +138,24 @@ path = "docs/components/connectors/task-tracking/jira.md"
 name = "Jira Connector Specification"
 
 [[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/connectors/collaboration/m365/specs/PRD.md"
+name = "Microsoft 365 Connector PRD"
+
+[[systems.artifacts]]
 kind = "DESIGN"
-path = "docs/components/connectors/m365.md"
-name = "Microsoft 365 Connector Specification"
+path = "docs/components/connectors/collaboration/m365/specs/DESIGN.md"
+name = "Microsoft 365 Connector Design"
+
+[[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/connectors/collaboration/zoom/specs/PRD.md"
+name = "Zoom Connector PRD"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/components/connectors/collaboration/zoom/specs/DESIGN.md"
+name = "Zoom Connector Design"
 
 [[systems.artifacts]]
 kind = "DESIGN"
@@ -131,6 +166,16 @@ name = "Zulip Connector Specification"
 kind = "DESIGN"
 path = "docs/components/connectors/collaboration/slack.md"
 name = "Slack Connector Specification"
+
+[[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/connectors/collaboration/slack/specs/PRD.md"
+name = "Slack Connector PRD"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/components/connectors/collaboration/slack/specs/DESIGN.md"
+name = "Slack Connector Design"
 
 [[systems.artifacts]]
 kind = "DESIGN"
@@ -153,6 +198,16 @@ path = "docs/components/connectors/ai-dev/cursor.md"
 name = "Cursor Connector Specification"
 
 [[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/connectors/ai-dev/cursor/specs/PRD.md"
+name = "Cursor Connector PRD"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/components/connectors/ai-dev/cursor/specs/DESIGN.md"
+name = "Cursor Connector Design"
+
+[[systems.artifacts]]
 kind = "DESIGN"
 path = "docs/components/connectors/ai-dev/windsurf.md"
 name = "Windsurf Connector Specification"
@@ -171,6 +226,16 @@ name = "Claude API Connector PRD"
 kind = "DESIGN"
 path = "docs/components/connectors/ai/claude-api/specs/DESIGN.md"
 name = "Claude API Connector Design"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/components/connectors/ai/claude-api/specs/ADR/ADR-001-group-by-limit-inference-geo.md"
+name = "ADR-001: Drop inference_geo from group_by dimensions"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/components/connectors/ai/claude-api/specs/ADR/ADR-002-api-response-structure.md"
+name = "ADR-002: API response structure — nested records and field mapping"
 
 [[systems.artifacts]]
 kind = "PRD"
@@ -209,15 +274,79 @@ name = "HubSpot Connector Specification"
 
 [[systems.artifacts]]
 kind = "DESIGN"
-path = "docs/components/connectors/crm/salesforce.md"
-name = "Salesforce Connector Specification"
-
-[[systems.artifacts]]
-kind = "DESIGN"
 path = "docs/components/connectors/allure.md"
 name = "Allure TestOps Connector Specification"
+
+[[systems.artifacts]]
+kind = "PRD"
+path = "docs/domain/connector/specs/PRD.md"
+name = "Connector Framework"
 
 [[systems.artifacts]]
 kind = "DESIGN"
 path = "docs/domain/connector/specs/DESIGN.md"
 name = "Connector Framework Design"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/domain/connector/specs/ADR/0001-connector-integration-protocol.md"
+name = "ADR-0001: Connector-to-System Integration Protocol"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/domain/connector/specs/ADR/0002-connector-responsibility-scope.md"
+name = "ADR-0002: Connector Responsibility Scope"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/domain/connector/specs/ADR/0003-connector-message-protocol.md"
+name = "ADR-0003: Connector Message Protocol"
+
+[[systems.artifacts]]
+kind = "DECOMPOSITION"
+path = "docs/domain/ingestion/specs/DECOMPOSITION.md"
+name = "Ingestion Layer Decomposition"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "PRD"
+path = "docs/domain/ingestion/specs/PRD.md"
+name = "Ingestion Layer PRD"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/domain/ingestion/specs/DESIGN.md"
+name = "Ingestion Layer Design"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/domain/ingestion/specs/ADR/0001-kestra-over-airflow.md"
+name = "ADR-0001: Kestra over Airflow (superseded)"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "ADR"
+path = "docs/domain/ingestion/specs/ADR/0002-argo-over-kestra.md"
+name = "ADR-0002: Argo Workflows over Kestra"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/domain/airbyte-connector/specs/DESIGN.md"
+name = "Airbyte Connector Development Guide"
+traceability = "DOCS-ONLY"
+
+[[systems]]
+name = "Orchestrator"
+slug = "orch"
+kit = "sdlc"
+codebase = ["docs/components/orchestrator"]
+children = []
+
+[[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/orchestrator/specs/PRD.md"
+name = "Orchestrator PRD"
+traceability = "DOCS-ONLY"
