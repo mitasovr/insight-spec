@@ -398,14 +398,48 @@ export KUBECONFIG=/path/to/your/kubeconfig
 ./up.sh   # Uses ENV=production, applies production Helm values
 ```
 
-### Step 2: Create and Apply Secrets
+### Step 2: Set Up GHCR Image Pull
+
+Argo workflow templates use `ghcr.io/cyberfabric/insight-toolbox:latest` for dbt jobs.
+The image is private, so the cluster needs a pull secret.
+
+```bash
+# 1. Create a GitHub Personal Access Token (PAT) at https://github.com/settings/tokens
+#    Required scopes: read:packages (to pull), write:packages (to push updates)
+
+# 2. Create pull secret in argo and data namespaces
+kubectl create secret docker-registry ghcr-pull \
+  --docker-server=https://ghcr.io \
+  --docker-username=YOUR_GITHUB_USERNAME \
+  --docker-password=YOUR_PAT \
+  -n argo
+
+kubectl create secret docker-registry ghcr-pull \
+  --docker-server=https://ghcr.io \
+  --docker-username=YOUR_GITHUB_USERNAME \
+  --docker-password=YOUR_PAT \
+  -n data
+
+# 3. Patch default service account so all pods can pull
+kubectl patch serviceaccount default -n argo -p '{"imagePullSecrets": [{"name": "ghcr-pull"}]}'
+kubectl patch serviceaccount default -n data -p '{"imagePullSecrets": [{"name": "ghcr-pull"}]}'
+```
+
+To rebuild and push the toolbox image (after dbt model changes):
+```bash
+cd src/ingestion
+docker buildx build --platform linux/amd64 \
+  -t ghcr.io/cyberfabric/insight-toolbox:latest \
+  -f tools/toolbox/Dockerfile --push .
+```
+
+### Step 3: Create and Apply Secrets
 
 All credentials are stored in K8s Secrets. Example templates live in `secrets/`:
 
 ```bash
 # Copy example templates and fill in real credentials
 cp secrets/clickhouse.yaml.example secrets/clickhouse.yaml
-cp secrets/airbyte.yaml.example secrets/airbyte.yaml
 cp secrets/connectors/m365.yaml.example secrets/connectors/m365.yaml
 cp secrets/connectors/zoom.yaml.example secrets/connectors/zoom.yaml
 # Edit each .yaml file with real credentials
@@ -419,7 +453,7 @@ Apply all secrets at once:
 ./secrets/apply.sh --connectors-only  # Only connector secrets
 ```
 
-### Step 3: Initialize
+### Step 4: Initialize
 
 ```bash
 ./run-init.sh   # Creates databases, registers connectors, applies connections, syncs workflows
