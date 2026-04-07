@@ -88,21 +88,23 @@ if [[ ! -f "${manifest_path}" ]]; then
   exit 1
 fi
 
-# --- Load credentials from tenant yaml (skip for validate) ---
+# --- Load credentials from K8s Secret file + tenant yaml (skip for validate) ---
 if [[ "${command}" != "validate" ]]; then
   tenant="${3:-}"
+  SECRETS_DIR="${SCRIPT_DIR}/../../secrets/connectors"
+
+  # Find tenant config (for tenant_id)
   if [[ -z "${tenant}" ]]; then
-    # Auto-detect: use first tenant yaml that has this connector
+    # Auto-detect: use first tenant yaml
     for f in "${CONNECTIONS_DIR}"/*.yaml; do
       [[ -f "$f" ]] || continue
-      if yq -e ".connectors.${connector_name}" "$f" >/dev/null 2>&1; then
-        tenant="$(basename "$f" .yaml)"
-        echo "INFO: Auto-detected tenant: ${tenant}" >&2
-        break
-      fi
+      [[ "$(basename "$f")" == *.example ]] && continue
+      tenant="$(basename "$f" .yaml)"
+      echo "INFO: Auto-detected tenant: ${tenant}" >&2
+      break
     done
     if [[ -z "${tenant}" ]]; then
-      echo "ERROR: No tenant specified and none found with ${connector_name} credentials" >&2
+      echo "ERROR: No tenant specified and none found in connections/" >&2
       echo "  Usage: $0 ${command} ${connector} <tenant>" >&2
       exit 1
     fi
@@ -113,21 +115,42 @@ if [[ "${command}" != "validate" ]]; then
     echo "ERROR: Tenant config not found: ${tenant_file}" >&2
     exit 1
   fi
-
-  # Build AIRBYTE_CONFIG JSON from tenant yaml
   tenant_id=$(yq -r '.tenant_id' "${tenant_file}")
-  AIRBYTE_CONFIG=$(yq -r ".connectors.${connector_name}" "${tenant_file}" | python3 -c "
-import sys, json, yaml
-data = yaml.safe_load(sys.stdin)
-if isinstance(data, list):
-    data = data[0]  # Use first instance for local debugging
+
+  # Build AIRBYTE_CONFIG JSON from K8s Secret file (secrets/connectors/<name>.yaml)
+  secret_file="${SECRETS_DIR}/${connector_name}.yaml"
+  if [[ ! -f "${secret_file}" ]]; then
+    echo "ERROR: Secret file not found: ${secret_file}" >&2
+    echo "  Create from template: cp ${SECRETS_DIR}/${connector_name}.yaml.example ${secret_file}" >&2
+    exit 1
+  fi
+
+  AIRBYTE_CONFIG=$(python3 -c "
+import json, yaml, sys
+
+with open('${secret_file}') as f:
+    secret = yaml.safe_load(f)
+
+data = secret.get('stringData', {})
+# Parse JSON strings (arrays/objects) stored in Secret stringData
+for k, v in list(data.items()):
+    if isinstance(v, str):
+        try:
+            parsed = json.loads(v)
+            if isinstance(parsed, (list, dict)):
+                data[k] = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+# Inject platform fields from tenant config and Secret annotations
 data['insight_tenant_id'] = '${tenant_id}'
-if 'insight_source_id' not in data:
-    data['insight_source_id'] = '${connector_name}-default'
+annotations = secret.get('metadata', {}).get('annotations', {})
+data['insight_source_id'] = annotations.get('insight.cyberfabric.com/source-id', '${connector_name}-default')
+
 print(json.dumps(data))
 ")
   if [[ -z "${AIRBYTE_CONFIG:-}" || "${AIRBYTE_CONFIG}" == "null" ]]; then
-    echo "ERROR: No credentials for '${connector_name}' in ${tenant_file}" >&2
+    echo "ERROR: Could not build config from ${secret_file}" >&2
     exit 1
   fi
 fi

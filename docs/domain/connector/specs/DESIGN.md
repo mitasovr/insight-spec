@@ -849,6 +849,7 @@ Rules:
 - `tenant_id`, `source_id`, and `unique_key` are required string fields in every schema
 - Use nullable types (`type: [string, "null"]`) only where the API actually returns null values -- do not make all fields nullable by default
 - Do not invent fields -- derive from real API responses via `generate-schema.sh`
+- **Dynamic-key objects** -- when a JSON object uses dynamic keys (keys that are data values, not fixed field names), the schema MUST use `additionalProperties: true` on that object and MUST NOT list individual sample keys in `properties`. Common examples: date-keyed objects (`{"2022-07-04": "1", "2022-07-05": "1"}`), ID-keyed maps, locale-keyed translations. This is a common Builder pitfall: `autoImportSchema` generates schema from a sample response and hardcodes sample keys as properties, producing a schema that rejects keys not seen in the sample.
 
 ### 4.8 Raw Data Field for Configurable Streams
 
@@ -1055,6 +1056,7 @@ WHERE e.tenant_id = t.tenant_id
 | Duplicate records across instances | `unique_key` does not include `tenant_id` + `source_id` | Prefix `unique_key` with `config['insight_tenant_id']` + `config['insight_source_id']` |
 | Config collision (`tenant_id` ambiguous) | Bare field name without prefix | Use `insight_tenant_id`, `azure_tenant_id`, etc. |
 | Builder UI shows wrong test values | Airbyte rebuilds test config from spec on manifest update | Re-enter test values manually in Builder UI |
+| Schema rejects valid records with new keys | `autoImportSchema` hardcoded sample dynamic keys (dates, IDs) as `properties` | Replace object `properties` with `additionalProperties: true`; do not enumerate dynamic keys |
 
 ### 4.15 Deployment Pitfalls
 

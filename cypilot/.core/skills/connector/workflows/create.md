@@ -169,6 +169,7 @@ Schema specifics:
 - Type arrays: `[type, "null"]` not `["null", type]`
 - MUST include `required: [unique_key]`
 - MUST include `additionalProperties: true`
+- **Dynamic-key objects**: when an object uses data-driven keys (dates, IDs, locales) instead of fixed field names, define it as `type: object` with `additionalProperties: true` and do NOT list sample keys in `properties` -- Builder's `autoImportSchema` will hardcode sample keys, which must be removed.
 
 **BasicHttpAuthenticator warning**: when using `BasicHttpAuthenticator`, Builder auto-adds `username` and `password` to `spec.connection_specification`. These are Builder artifacts — they map from the authenticator config fields and should NOT be added to K8s Secrets. The real credential fields use source-specific prefixes (e.g. `bamboohr_api_key`).
 
