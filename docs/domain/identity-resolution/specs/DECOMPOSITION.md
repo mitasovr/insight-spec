@@ -148,8 +148,8 @@ These items have schema defined in DESIGN §3.7 (`cpt-insightspec-ir-dbtable-mer
 
 - **Requirements Covered**:
 
-  - [ ] `p1` - `cpt-ir-fr-accept-bootstrap-inputs`
-  - [ ] `p1` - `cpt-ir-fr-bootstrap-incremental`
+  - [x] `p1` - `cpt-ir-fr-accept-bootstrap-inputs`
+  - [x] `p1` - `cpt-ir-fr-bootstrap-incremental`
   - [ ] `p1` - `cpt-ir-fr-normalize-aliases`
   - [ ] `p1` - `cpt-ir-fr-create-alias-exact`
   - [ ] `p1` - `cpt-ir-fr-route-unmapped`
@@ -181,7 +181,7 @@ These items have schema defined in DESIGN §3.7 (`cpt-insightspec-ir-dbtable-mer
 
 - **API**:
   - (No new API endpoints — BootstrapJob is a batch job, not an API service)
-  - Connector write contract: INSERT into `bootstrap_inputs`
+  - Connector write contract: dbt `bootstrap_inputs_from_history` macro applied to `fields_history` models (implemented for BambooHR and Zoom)
 
 - **Sequences**:
 
@@ -189,13 +189,13 @@ These items have schema defined in DESIGN §3.7 (`cpt-insightspec-ir-dbtable-mer
 
 - **Data**:
 
-  - [ ] `p1` - `cpt-insightspec-ir-dbtable-bootstrap-inputs`
+  - [x] `p1` - `cpt-insightspec-ir-dbtable-bootstrap-inputs`
   - [ ] `p2` - `cpt-insightspec-ir-dbtable-unmapped`
   - [ ] `p2` - `cpt-insightspec-ir-dbtable-conflicts`
 
 - **Interfaces**:
 
-  - [ ] `p1` - `cpt-ir-contract-bootstrap-inputs`
+  - [x] `p1` - `cpt-ir-contract-bootstrap-inputs`
 
 ---
 

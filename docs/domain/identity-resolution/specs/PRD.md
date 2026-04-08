@@ -219,7 +219,7 @@ The system **MUST** isolate alias data by `insight_tenant_id`. A resolution requ
 
 #### Accept Alias Observations from Connectors
 
-- [ ] `p1` - **ID**: `cpt-ir-fr-accept-bootstrap-inputs`
+- [x] `p1` - **ID**: `cpt-ir-fr-accept-bootstrap-inputs`
 
 The system **MUST** accept alias observation records into the `bootstrap_inputs` table. Each record **MUST** include: `insight_tenant_id`, `insight_source_id`, `insight_source_type`, `source_account_id`, `alias_type`, `alias_value`, `alias_field_name`, `operation_type` (UPSERT or DELETE).
 
@@ -229,7 +229,7 @@ The system **MUST** accept alias observation records into the `bootstrap_inputs`
 
 #### Process Bootstrap Inputs Incrementally
 
-- [ ] `p1` - **ID**: `cpt-ir-fr-bootstrap-incremental`
+- [x] `p1` - **ID**: `cpt-ir-fr-bootstrap-incremental`
 
 The BootstrapJob **MUST** process `bootstrap_inputs` rows incrementally, reading only rows with `_synced_at` greater than the last processing watermark. It **MUST** update the watermark after each successful run.
 
@@ -527,7 +527,7 @@ Every merge operation **MUST** be fully reversible via split. After a merge-then
 
 #### Bootstrap Inputs Write Contract
 
-- [ ] `p1` - **ID**: `cpt-ir-contract-bootstrap-inputs`
+- [x] `p1` - **ID**: `cpt-ir-contract-bootstrap-inputs`
 
 **Direction**: required from client (connectors)
 

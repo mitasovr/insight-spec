@@ -460,7 +460,7 @@ Detects alias-level conflicts — when the same alias value appears linked to di
 | Person domain (`persons` table) | Logical FK (`aliases.person_id → persons.id`) | Alias-to-person mapping target |
 | Person domain (person creation) | Domain event / API | BootstrapJob triggers person creation when new identity discovered (Phase 2+) |
 | Connector sync events | Argo Workflow trigger | BootstrapJob runs after connector sync completes |
-| dbt models (Bronze → Silver) | ClickHouse tables | Connectors populate `bootstrap_inputs` during Silver transformations |
+| dbt models (Bronze → Silver) | ClickHouse tables | Connectors populate `bootstrap_inputs` via `bootstrap_inputs_from_history` macro applied to `fields_history` models |
 
 **Dependency Rules**:
 - No circular dependencies between identity-resolution and person domains
@@ -605,7 +605,19 @@ All tables are in ClickHouse. Naming follows PR #55 conventions. No Nullable unl
 
 **ID**: `cpt-insightspec-ir-dbtable-bootstrap-inputs`
 
-Alias observations from connectors. Each row represents one changed alias value from one source. Connectors write to this table during their sync pipeline.
+Alias observations from connectors. Each row represents one changed alias value from one source.
+
+**Population mechanism**: Connectors populate this table via dbt models using the shared `bootstrap_inputs_from_history` macro. Each connector declares:
+- `identity_fields` — mapping of source field names to alias types (e.g., `workEmail → email`, `employeeNumber → employee_id`)
+- `deactivation_condition` — SQL expression that detects entity deactivation (e.g., `field_name = 'status' AND new_value = 'Inactive'`), which emits DELETE rows for all identity fields
+
+The macro reads from the connector's `fields_history` model (field-level change log from snapshots) and produces:
+- **UPSERT** rows when an identity-relevant field changes
+- **DELETE** rows (with empty `alias_value`) when the deactivation condition is met
+
+Per-connector staging tables (e.g., `staging.bamboohr__bootstrap_inputs`) are unified into a single `default.bootstrap_inputs` view via `union_by_tag('silver:bootstrap_inputs')`.
+
+The models are incremental (`append` strategy): each run processes only `fields_history` rows with `updated_at` newer than the last `_synced_at` in the target table.
 
 | Column | Type | Description |
 |---|---|---|
@@ -1044,7 +1056,7 @@ The Dictionary approach trades a 30-60s cache lag for faster lookup in high-thro
 
 **Sources**: BambooHR (employee_id: E123, email: anna.ivanova@acme.com), Active Directory (username: aivanova, email after name change: anna.smirnova@acme.com), GitHub (username: annai), GitLab (username: ivanova.anna), Jira (username: aivanova).
 
-**Step 1 — Connectors write to `bootstrap_inputs`**:
+**Step 1 — dbt `bootstrap_inputs_from_history` generates rows from `fields_history`**:
 
 | `insight_source_type` | `source_account_id` | `alias_type` | `alias_value` | `alias_field_name` |
 |---|---|---|---|---|
