@@ -346,6 +346,18 @@ name = "Airbyte Connector Development Guide"
 traceability = "DOCS-ONLY"
 
 [[systems.artifacts]]
+kind = "PRD"
+path = "docs/components/airbyte-toolkit/specs/PRD.md"
+name = "Airbyte Toolkit PRD"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
+kind = "DESIGN"
+path = "docs/components/airbyte-toolkit/specs/DESIGN.md"
+name = "Airbyte Toolkit Design"
+traceability = "DOCS-ONLY"
+
+[[systems.artifacts]]
 kind = "ADR"
 path = "docs/shared/glossary/ADR/0001-uuidv7-primary-key.md"
 name = "ADR-0001: UUIDv7 as Universal Primary Key"
@@ -434,15 +446,4 @@ name = "Org-Chart Domain Design"
 kind = "PRD"
 path = "docs/domain/org-chart/specs/PRD.md"
 name = "Org-Chart Domain PRD"
-
-[[systems.artifacts]]
-kind = "PRD"
-path = "docs/components/airbyte-toolkit/specs/PRD.md"
-name = "Airbyte Toolkit PRD"
-traceability = "DOCS-ONLY"
-
-[[systems.artifacts]]
-kind = "DESIGN"
-path = "docs/components/airbyte-toolkit/specs/DESIGN.md"
-name = "Airbyte Toolkit Design"
 traceability = "DOCS-ONLY"

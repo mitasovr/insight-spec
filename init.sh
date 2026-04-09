@@ -79,13 +79,11 @@ echo "    API:        http://localhost:8000/api/v1"
 echo "    Airbyte:    http://localhost:8001"
 echo "    Argo UI:    http://localhost:30500"
 echo "    ClickHouse: http://localhost:30123"
-AIRBYTE_EMAIL=$(kubectl get secret airbyte-auth-secrets -n airbyte -o jsonpath='{.data.instance-admin-email}' 2>/dev/null | base64 -d 2>/dev/null) || true
-AIRBYTE_PASS=$(kubectl get secret airbyte-auth-secrets -n airbyte -o jsonpath='{.data.instance-admin-password}' 2>/dev/null | base64 -d 2>/dev/null) || true
-if [[ -n "$AIRBYTE_PASS" ]]; then
+if kubectl get secret airbyte-auth-secrets -n airbyte &>/dev/null; then
   echo ""
   echo "  Airbyte UI login:"
-  echo "    Email:    ${AIRBYTE_EMAIL:-admin@example.com}"
-  echo "    Password: ${AIRBYTE_PASS}"
+  echo "    Email:    admin@example.com"
+  echo "    Password: kubectl get secret airbyte-auth-secrets -n airbyte -o jsonpath='{.data.instance-admin-password}' | base64 -d"
 fi
 echo ""
 echo "  Run a sync:"

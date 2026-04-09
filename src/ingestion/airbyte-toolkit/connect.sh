@@ -241,6 +241,7 @@ if not shared_dest_id:
         print(f"  ERROR: could not create shared ClickHouse destination: {result}", file=sys.stderr)
         sys.exit(1)
 state_set(state, "destinations.clickhouse.id", shared_dest_id)
+save_state(state)
 
 # ---------------------------------------------------------------------------
 # Discover K8s Secrets
@@ -354,6 +355,7 @@ for connector_name, source_id_label, config in connector_instances:
             print(f"    ERROR: could not create source for {connector_name}: {result}", file=sys.stderr)
             continue
     state_set(state, f"{tenant_connector_path}.source_id", source_id)
+    save_state(state)
 
     # --- Connection (ID-based: state -> verify -> create if missing) ---
     connection_name = f"{connector_name}-{source_id_label}-to-clickhouse-{tenant_id}"
@@ -411,6 +413,7 @@ for connector_name, source_id_label, config in connector_instances:
 
     if connection_id:
         state_set(state, f"{tenant_connector_path}.connection_id", connection_id)
+        save_state(state)
 
 # ---------------------------------------------------------------------------
 # Persist state

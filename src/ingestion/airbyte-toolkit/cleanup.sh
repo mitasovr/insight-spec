@@ -17,9 +17,18 @@ MODE="${1:---all}"
 
 _api_delete() {
   local path="$1" body="$2"
-  curl -sf -X POST -H "Authorization: Bearer $AIRBYTE_TOKEN" \
+  local http_code
+  http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    -H "Authorization: Bearer $AIRBYTE_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "$body" "${AIRBYTE_API}${path}" >/dev/null 2>&1 || true
+    -d "$body" "${AIRBYTE_API}${path}" 2>/dev/null)
+
+  if [[ "$http_code" =~ ^2[0-9]{2}$ ]] || [[ "$http_code" == "404" ]]; then
+    return 0
+  else
+    echo "    WARNING: API returned HTTP $http_code for ${path}, skipping state deletion" >&2
+    return 1
+  fi
 }
 
 cleanup_tenant() {
@@ -32,19 +41,24 @@ cleanup_tenant() {
       conn_id=$(state_get "tenants.$tenant.connectors.$connector.$source_id.connection_id")
       if [[ -n "$conn_id" ]]; then
         echo "    Deleting connection: $connector/$source_id ($conn_id)"
-        _api_delete "/api/v1/connections/delete" "{\"connectionId\":\"$conn_id\"}"
+        if _api_delete "/api/v1/connections/delete" "{\"connectionId\":\"$conn_id\"}"; then
+          state_delete "tenants.$tenant.connectors.$connector.$source_id.connection_id"
+        fi
       fi
 
       local src_id
       src_id=$(state_get "tenants.$tenant.connectors.$connector.$source_id.source_id")
       if [[ -n "$src_id" ]]; then
         echo "    Deleting source: $connector/$source_id ($src_id)"
-        _api_delete "/api/v1/sources/delete" "{\"sourceId\":\"$src_id\"}"
+        if _api_delete "/api/v1/sources/delete" "{\"sourceId\":\"$src_id\"}"; then
+          state_delete "tenants.$tenant.connectors.$connector.$source_id.source_id"
+        fi
       fi
     done
   done
 
   state_delete "tenants.$tenant"
+  _state_sync_cm
 }
 
 echo "=== Airbyte Toolkit: Cleanup ==="
@@ -60,13 +74,16 @@ if [[ "$MODE" == "--all" ]]; then
     dest_id=$(state_get "destinations.$dest.id")
     if [[ -n "$dest_id" ]]; then
       echo "  Deleting destination: $dest ($dest_id)"
-      _api_delete "/api/v1/destinations/delete" "{\"destinationId\":\"$dest_id\"}"
+      if _api_delete "/api/v1/destinations/delete" "{\"destinationId\":\"$dest_id\"}"; then
+        state_delete "destinations.$dest"
+      fi
     fi
   done
   state_delete "destinations"
 
   # Clear state
   echo "{}" > "$STATE_FILE"
+  _state_sync_cm
   echo "  State cleared"
 else
   cleanup_tenant "$MODE"

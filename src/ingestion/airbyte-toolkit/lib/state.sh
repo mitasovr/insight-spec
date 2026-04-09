@@ -23,30 +23,25 @@ _state_in_cluster() {
   [[ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]]
 }
 
+# Ensure state file exists. In-cluster: hydrate from ConfigMap first.
 _state_init() {
   if _state_in_cluster; then
+    # Ensure ConfigMap exists
     kubectl get configmap "$STATE_CM_NAME" -n "$STATE_CM_NS" >/dev/null 2>&1 || \
       kubectl create configmap "$STATE_CM_NAME" -n "$STATE_CM_NS" --from-literal=state.yaml="{}" 2>/dev/null
+    # Hydrate local file from ConfigMap (authoritative in-cluster source)
+    kubectl get configmap "$STATE_CM_NAME" -n "$STATE_CM_NS" \
+      -o jsonpath='{.data.state\.yaml}' > "$STATE_FILE" 2>/dev/null || echo "{}" > "$STATE_FILE"
   fi
   [[ -f "$STATE_FILE" ]] || echo "{}" > "$STATE_FILE"
 }
 
+# Publish state file to ConfigMap (in-cluster only)
 _state_sync_cm() {
   if _state_in_cluster; then
     kubectl create configmap "$STATE_CM_NAME" -n "$STATE_CM_NS" \
       --from-file=state.yaml="$STATE_FILE" --dry-run=client -o yaml | \
       kubectl apply -f - >/dev/null 2>&1
-  fi
-}
-
-_state_src() {
-  if _state_in_cluster; then
-    local tmp="/tmp/_airbyte_state.yaml"
-    kubectl get configmap "$STATE_CM_NAME" -n "$STATE_CM_NS" \
-      -o jsonpath='{.data.state\.yaml}' > "$tmp" 2>/dev/null || echo "{}" > "$tmp"
-    echo "$tmp"
-  else
-    echo "$STATE_FILE"
   fi
 }
 
@@ -57,7 +52,7 @@ state_get() {
   _state_init
   python3 -c "
 import yaml, sys
-d = yaml.safe_load(open('$(_state_src)')) or {}
+d = yaml.safe_load(open('$STATE_FILE')) or {}
 for k in '$path'.split('.'):
     if isinstance(d, dict):
         d = d.get(k, '')
@@ -122,7 +117,7 @@ state_list() {
   _state_init
   python3 -c "
 import yaml
-d = yaml.safe_load(open('$(_state_src)')) or {}
+d = yaml.safe_load(open('$STATE_FILE')) or {}
 for k in '$path'.split('.'):
     if isinstance(d, dict):
         d = d.get(k, {})
@@ -138,5 +133,5 @@ if isinstance(d, dict):
 # state_dump — print full state YAML
 state_dump() {
   _state_init
-  cat "$(_state_src)" 2>/dev/null
+  cat "$STATE_FILE" 2>/dev/null
 }

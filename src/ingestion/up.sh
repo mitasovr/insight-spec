@@ -16,7 +16,7 @@ fi
 echo "=== Ingestion: deploying services ==="
 
 # --- Prerequisites ---
-for cmd in kubectl helm; do
+for cmd in kubectl helm python3; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "ERROR: $cmd is required but not found" >&2
     exit 1
@@ -65,22 +65,24 @@ else
 fi
 
 # --- ClickHouse ---
-# Auto-create credentials secret if it doesn't exist (like Airbyte does)
+# Auto-create credentials secret if missing in any namespace
+_ch_ensure_secret() {
+  local ns="$1"
+  if ! has_secret clickhouse-credentials "$ns"; then
+    echo "  Creating ClickHouse credentials secret in namespace '$ns'..."
+    kubectl create secret generic clickhouse-credentials -n "$ns" \
+      --from-literal=username=default \
+      --from-literal=password="$CH_PASS"
+  fi
+}
 if ! has_secret clickhouse-credentials data; then
   CH_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
-  echo "  Creating ClickHouse credentials secret (auto-generated password)..."
-  kubectl create secret generic clickhouse-credentials -n data \
-    --from-literal=username=default \
-    --from-literal=password="$CH_PASS"
-  # ClickHouse password also needed in argo namespace (for dbt jobs)
-  kubectl create secret generic clickhouse-credentials -n argo \
-    --from-literal=username=default \
-    --from-literal=password="$CH_PASS"
-  # ClickHouse password also needed in insight namespace (for api-gateway)
-  kubectl create secret generic clickhouse-credentials -n insight \
-    --from-literal=username=default \
-    --from-literal=password="$CH_PASS" 2>/dev/null || true
+else
+  CH_PASS=$(kubectl get secret clickhouse-credentials -n data -o jsonpath='{.data.password}' | base64 -d)
 fi
+_ch_ensure_secret data
+_ch_ensure_secret argo
+_ch_ensure_secret insight
 echo "  Deploying ClickHouse..."
 kubectl apply -f k8s/clickhouse/
 kubectl scale deployment/clickhouse -n data --replicas=1 2>/dev/null || true

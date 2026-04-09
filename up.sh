@@ -90,13 +90,17 @@ if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "backend
   fi
 
   echo "=== Deploying API Gateway ==="
-  helm upgrade --install insight-gw src/backend/services/api-gateway/helm/ \
-    --namespace insight \
-    --set image.repository=insight-api-gateway \
-    --set image.tag=local \
-    --set authDisabled=true \
-    --set ingress.host="" \
+  GW_HELM_ARGS=(
+    --namespace insight
+    --set image.repository=insight-api-gateway
+    --set image.tag=local
+    --set image.pullPolicy=IfNotPresent
     --wait --timeout 3m
+  )
+  if [[ "$ENV" == "local" ]]; then
+    GW_HELM_ARGS+=(--set authDisabled=true --set ingress.host="" --set gateway.enableDocs=true)
+  fi
+  helm upgrade --install insight-gw src/backend/services/api-gateway/helm/ "${GW_HELM_ARGS[@]}"
 fi
 
 # ─── Frontend ────────────────────────────────────────────────────────────────
@@ -117,6 +121,7 @@ if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "fronten
     echo "=== Deploying Frontend ==="
     helm upgrade --install insight-fe src/frontend/helm/ \
       --namespace insight \
+      --set image.pullPolicy=IfNotPresent \
       --wait --timeout 3m
   fi
 fi
@@ -140,14 +145,12 @@ echo "    API:        http://localhost:8000/api/v1"
 echo "    Airbyte:    http://localhost:8001"
 echo "    Argo UI:    http://localhost:30500"
 echo "    ClickHouse: http://localhost:30123"
-# Show Airbyte UI credentials if auth is enabled
-AIRBYTE_EMAIL=$(kubectl get secret airbyte-auth-secrets -n airbyte -o jsonpath='{.data.instance-admin-email}' 2>/dev/null | base64 -d 2>/dev/null) || true
-AIRBYTE_PASS=$(kubectl get secret airbyte-auth-secrets -n airbyte -o jsonpath='{.data.instance-admin-password}' 2>/dev/null | base64 -d 2>/dev/null) || true
-if [[ -n "$AIRBYTE_PASS" ]]; then
+# Show Airbyte UI credentials hint (don't print password to logs)
+if kubectl get secret airbyte-auth-secrets -n airbyte &>/dev/null; then
   echo ""
   echo "  Airbyte UI login:"
-  echo "    Email:    ${AIRBYTE_EMAIL:-admin@example.com}"
-  echo "    Password: ${AIRBYTE_PASS}"
+  echo "    Email:    admin@example.com"
+  echo "    Password: kubectl get secret airbyte-auth-secrets -n airbyte -o jsonpath='{.data.instance-admin-password}' | base64 -d"
 fi
 echo ""
 echo "  Next steps:"

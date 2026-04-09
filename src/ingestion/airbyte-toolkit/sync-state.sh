@@ -30,8 +30,11 @@ def api(path, data):
     try:
         return json.loads(urllib.request.urlopen(req).read())
     except urllib.error.HTTPError as e:
-        print(f"  API error {e.code}: {e.read().decode()[:200]}", file=sys.stderr)
-        return {}
+        print(f"ERROR: API call {path} failed with HTTP {e.code}: {e.read().decode()[:200]}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"ERROR: API call {path} failed: {e.reason}", file=sys.stderr)
+        sys.exit(1)
 
 # Load or init state
 data = yaml.safe_load(open(state_file)) if os.path.exists(state_file) else {}
@@ -51,13 +54,13 @@ print(f"  Definitions: {len(definitions)} ({', '.join(definitions.keys())})")
 # --- Destinations ---
 dests = api("/api/v1/destinations/list", {"workspaceId": workspace_id})
 destinations = {}
-for d in dests.get("destinations", []):
-    # Use logical name from destination name
-    name = d["name"].lower().replace(" ", "-")
+for i, d in enumerate(dests.get("destinations", [])):
+    # Use stable key "clickhouse" for the first destination, avoid dependency on UI display name
+    key = "clickhouse" if i == 0 else f"dest-{i}"
     entry = {"id": d["destinationId"]}
     if "destinationDefinitionId" in d:
         entry["definition_id"] = d["destinationDefinitionId"]
-    destinations[name] = entry
+    destinations[key] = entry
 data["destinations"] = destinations
 print(f"  Destinations: {len(destinations)}")
 
@@ -139,5 +142,8 @@ with open(state_file, "w") as f:
     yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 print(f"\nState saved: {state_file}")
 PY
+
+# Sync state file to ConfigMap (in-cluster)
+_state_sync_cm
 
 echo "Done."
