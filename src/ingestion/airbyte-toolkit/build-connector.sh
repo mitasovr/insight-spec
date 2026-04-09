@@ -5,8 +5,8 @@ set -euo pipefail
 # Build a CDK connector: Docker image → Kind load → Airbyte definition register/update.
 #
 # Usage:
-#   ./scripts/build-connector.sh <connector_path>
-#   ./scripts/build-connector.sh git/github
+#   ./airbyte-toolkit/build-connector.sh <connector_path>
+#   ./airbyte-toolkit/build-connector.sh git/github
 #
 # For nocode connectors (connector.yaml), use airbyte-toolkit/register.sh instead.
 # ---------------------------------------------------------------------------

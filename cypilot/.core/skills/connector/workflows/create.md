@@ -394,7 +394,7 @@ kubectl apply -f src/ingestion/secrets/connectors/<name>.yaml
 
 ```bash
 ./tools/declarative-connector/source.sh discover <category>/<name> <tenant>
-./scripts/generate-schema.sh <name>
+./airbyte-toolkit/generate-schema.sh <name>
 ```
 
 This saves real JSON schemas to `connectors/<category>/<name>/schemas/`.
@@ -407,7 +407,7 @@ Verify that all cursor fields exist in the schema (this prevents ClickHouse dest
 ### 5.6 Read data locally
 
 ```bash
-./scripts/generate-catalog.sh <name>
+./airbyte-toolkit/generate-catalog.sh <name>
 ./tools/declarative-connector/source.sh read <category>/<name> <tenant>
 ```
 

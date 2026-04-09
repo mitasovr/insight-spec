@@ -812,7 +812,7 @@ The `unique_key` pattern is always: `{{ config['insight_tenant_id'] }}-{{ config
 
 ### 4.7 Schema Rules
 
-Schemas MUST be generated from real API data using `./scripts/generate-schema.sh {name}`.
+Schemas MUST be generated from real API data using `./airbyte-toolkit/generate-schema.sh {name}`.
 
 Use `InlineSchemaLoader` with explicit field definitions:
 
@@ -1022,8 +1022,8 @@ Credentials are never stored in the connector package:
 | 4 | Validate | `./tools/declarative-connector/source.sh validate {cat}/{name}` |
 | 5 | Check | `./tools/declarative-connector/source.sh check {cat}/{name}` |
 | 6 | Discover | `./tools/declarative-connector/source.sh discover {cat}/{name}` |
-| 7 | Generate schema | `./scripts/generate-schema.sh {name}` -- saves to `schemas/` |
-| 8 | Generate catalog | `./scripts/generate-catalog.sh {name}` -- saves configured catalog |
+| 7 | Generate schema | `./airbyte-toolkit/generate-schema.sh {name}` -- saves to `schemas/` |
+| 8 | Generate catalog | `./airbyte-toolkit/generate-catalog.sh {name}` -- saves configured catalog |
 | 9 | Read | `./tools/declarative-connector/source.sh read {cat}/{name} dev` |
 | 10 | Verify | Every record has `tenant_id`, `source_id`, `unique_key` |
 
@@ -1035,7 +1035,7 @@ Credentials are never stored in the connector package:
 | 2 | Write source | Implement `AbstractSource` with `check`, `streams`. Inject `tenant_id`, `source_id`, `unique_key` in records |
 | 3 | Write spec | `source_{name}/spec.json` with `insight_tenant_id`, `insight_source_id` required, prefixed config fields |
 | 4 | Create K8s Secret | Copy from `secrets/connectors/{name}.yaml.example`, fill in real values, apply |
-| 5 | Build + register | `./scripts/build-connector.sh {cat}/{name}` — Docker build → Kind load → Airbyte definition |
+| 5 | Build + register | `./airbyte-toolkit/build-connector.sh {cat}/{name}` — Docker build → Kind load → Airbyte definition |
 | 6 | Create connection | `./scripts/apply-connections.sh <tenant>` — source + connection via discover |
 | 7 | Sync | `./run-sync.sh {name} <tenant>` — Argo workflow (sync + dbt) |
 | 8 | Verify | Every record has `tenant_id`, `source_id`, `unique_key` |
@@ -1044,8 +1044,8 @@ Credentials are never stored in the connector package:
 
 | Step | Command | What it does |
 |------|---------|-------------|
-| 1 | Reset | `./scripts/reset-connector.sh {name} <tenant>` — deletes connection, source, definition; drops Bronze tables; cleans state |
-| 2 | Rebuild | `./scripts/build-connector.sh {cat}/{name}` (CDK) or `./scripts/upload-manifests.sh {cat}/{name}` (nocode) |
+| 1 | Reset | `./airbyte-toolkit/reset-connector.sh {name} <tenant>` — deletes connection, source, definition; drops Bronze tables; cleans state |
+| 2 | Rebuild | `./airbyte-toolkit/build-connector.sh {cat}/{name}` (CDK) or `./scripts/upload-manifests.sh {cat}/{name}` (nocode) |
 | 3 | Reconnect | `./scripts/apply-connections.sh <tenant>` |
 | 4 | Re-sync | `./run-sync.sh {name} <tenant>` |
 

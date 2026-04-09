@@ -6,8 +6,8 @@ set -euo pipefail
 # drop Bronze tables in ClickHouse, and clean state files.
 #
 # Usage:
-#   ./scripts/reset-connector.sh <connector_name> <tenant>
-#   ./scripts/reset-connector.sh github example-tenant
+#   ./airbyte-toolkit/reset-connector.sh <connector_name> <tenant>
+#   ./airbyte-toolkit/reset-connector.sh github example-tenant
 #
 # Use when: schema breaking changes, pk migration, full re-sync needed.
 # ---------------------------------------------------------------------------
@@ -26,19 +26,12 @@ if [[ ! "$CONNECTOR" =~ ^[a-z0-9_-]+$ ]]; then
   exit 1
 fi
 
-export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/kind-ingestion}"
+export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/insight.kubeconfig}"
 
-# Resolve tenant_id from tenant config
-TENANT_ID=$(python3 -c "
-import yaml, sys
-try:
-    t = yaml.safe_load(open('connections/${TENANT}.yaml'))
-    print(t.get('tenant_id', '${TENANT}'))
-except Exception:
-    print('${TENANT}')
-" 2>/dev/null)
+# Tenant key in state = filename stem (not tenant_id from inside YAML)
+TENANT_KEY="$TENANT"
 
-echo "=== Resetting connector: ${CONNECTOR} (tenant: ${TENANT}) ==="
+echo "=== Resetting connector: ${CONNECTOR} (tenant: ${TENANT_KEY}) ==="
 
 # --- Resolve Airbyte env ---
 if [[ -z "${AIRBYTE_TOKEN:-}" ]]; then
@@ -48,7 +41,7 @@ fi
 # --- Read state ---
 STATE_FILE="./airbyte-toolkit/state.yaml"
 
-python3 - "$CONNECTOR" "$TENANT_ID" "$AIRBYTE_API" "$AIRBYTE_TOKEN" \
+python3 - "$CONNECTOR" "$TENANT_KEY" "$AIRBYTE_API" "$AIRBYTE_TOKEN" \
   "$STATE_FILE" <<'PYTHON'
 import sys, os, json, yaml, urllib.request, urllib.error, subprocess, base64
 
@@ -154,7 +147,7 @@ echo ""
 echo "=== Reset complete: ${CONNECTOR} ==="
 echo ""
 echo "  To recreate:"
-echo "    ./scripts/build-connector.sh <path>     # CDK only"
+echo "    ./airbyte-toolkit/build-connector.sh <path>     # CDK only"
 echo "    ./airbyte-toolkit/register.sh <path>    # nocode only"
 echo "    ./airbyte-toolkit/connect.sh ${TENANT}"
 echo "    ./run-sync.sh ${CONNECTOR} ${TENANT}"

@@ -141,8 +141,8 @@ export KUBECONFIG=~/.kube/insight.kubeconfig
 
 | Command | Description |
 |---------|-------------|
-| `./scripts/build-connector.sh <path>` | Build Docker image, load into Kind, register/update Airbyte definition |
-| `./scripts/reset-connector.sh <name> <tenant>` | Delete connection + source + definition, drop Bronze tables, clean state |
+| `./airbyte-toolkit/build-connector.sh <path>` | Build Docker image, load into Kind, register/update Airbyte definition |
+| `./airbyte-toolkit/reset-connector.sh <name> <tenant>` | Delete connection + source + definition, drop Bronze tables, clean state |
 
 ### Examples
 
@@ -154,7 +154,7 @@ export KUBECONFIG=~/.kube/insight.kubeconfig
 ./update-connectors.sh
 
 # Build/rebuild a CDK connector (Docker image + Airbyte definition)
-./scripts/build-connector.sh git/github
+./airbyte-toolkit/build-connector.sh git/github
 
 # Update after changing tenant credentials
 ./update-connections.sh example-tenant
@@ -163,7 +163,7 @@ export KUBECONFIG=~/.kube/insight.kubeconfig
 ./update-workflows.sh
 
 # Reset a connector (breaking schema change, full re-sync)
-./scripts/reset-connector.sh github example-tenant
+./airbyte-toolkit/reset-connector.sh github example-tenant
 
 # Monitor workflows
 open http://localhost:30500
@@ -404,15 +404,15 @@ Every ID is accessed via a deterministic YAML path (no string concatenation, no 
 
 3. Deploy:
    ```bash
-   ./scripts/build-connector.sh {category}/{name}   # Build image + register definition
-   ./scripts/apply-connections.sh my-tenant          # Create source + connection
+   ./airbyte-toolkit/build-connector.sh {category}/{name}   # Build image + register definition
+   ./airbyte-toolkit/connect.sh my-tenant             # Create source + connection
    ./update-workflows.sh my-tenant
    ```
 
 ### Reset (breaking schema change)
 
 ```bash
-./scripts/reset-connector.sh <name> <tenant>   # Delete everything + drop Bronze tables
+./airbyte-toolkit/reset-connector.sh <name> <tenant>   # Delete everything + drop Bronze tables
 # Then re-deploy using the steps above
 ```
 

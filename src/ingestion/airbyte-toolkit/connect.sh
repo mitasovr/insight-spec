@@ -72,6 +72,18 @@ def state_set(data, dotpath, value):
         d = d.setdefault(k, {})
     d[keys[-1]] = value
 
+def state_pop(data, dotpath):
+    """Remove a key from a nested dict by dot-separated path."""
+    keys = dotpath.split(".")
+    d = data
+    for k in keys[:-1]:
+        if isinstance(d, dict) and k in d:
+            d = d[k]
+        else:
+            return
+    if isinstance(d, dict):
+        d.pop(keys[-1], None)
+
 state = load_state()
 
 # ---------------------------------------------------------------------------
@@ -330,8 +342,8 @@ for connector_name, source_id_label, config in connector_instances:
                 api("POST", "/api/v1/connections/delete", {"connectionId": old_conn})
             source_id = None
             # Clear stale IDs from state
-            state_set(state, f"{tenant_connector_path}.source_id", "")
-            state_set(state, f"{tenant_connector_path}.connection_id", "")
+            state_pop(state, f"{tenant_connector_path}.source_id")
+            state_pop(state, f"{tenant_connector_path}.connection_id")
         else:
             # Update source config (credentials may have changed)
             api("POST", "/api/v1/sources/update", {
@@ -435,8 +447,6 @@ PYTHON
 if [[ "${1:-}" == "--all" ]]; then
   for config_file in "${CONNECTIONS_DIR}"/*.yaml; do
     [[ -f "$config_file" ]] || continue
-    # Skip example files
-    [[ "$config_file" == *.example ]] && continue
     tenant=$(basename "$config_file" .yaml)
     echo "  Applying connections for tenant: $tenant"
     apply_tenant "$config_file"

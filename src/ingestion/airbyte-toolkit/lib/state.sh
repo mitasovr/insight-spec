@@ -50,17 +50,18 @@ _state_sync_cm() {
 state_get() {
   local path="$1"
   _state_init
-  python3 -c "
-import yaml, sys
-d = yaml.safe_load(open('$STATE_FILE')) or {}
-for k in '$path'.split('.'):
+  python3 - "$STATE_FILE" "$path" <<'PY'
+import sys, yaml
+state_file, path = sys.argv[1], sys.argv[2]
+d = yaml.safe_load(open(state_file)) or {}
+for k in path.split('.'):
     if isinstance(d, dict):
         d = d.get(k, '')
     else:
         d = ''
         break
 print(d if isinstance(d, str) else '')
-"
+PY
 }
 
 # state_set <dotpath> <value>
@@ -115,10 +116,11 @@ PY
 state_list() {
   local path="$1"
   _state_init
-  python3 -c "
-import yaml
-d = yaml.safe_load(open('$STATE_FILE')) or {}
-for k in '$path'.split('.'):
+  python3 - "$STATE_FILE" "$path" <<'PY'
+import sys, yaml
+state_file, path = sys.argv[1], sys.argv[2]
+d = yaml.safe_load(open(state_file)) or {}
+for k in path.split('.'):
     if isinstance(d, dict):
         d = d.get(k, {})
     else:
@@ -127,7 +129,7 @@ for k in '$path'.split('.'):
 if isinstance(d, dict):
     for k in d:
         print(k)
-"
+PY
 }
 
 # state_dump — print full state YAML

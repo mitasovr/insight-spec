@@ -11,7 +11,7 @@ Registers connector in Airbyte, creates connections, and sets up Argo workflows.
 
 - Connector package validated (`/connector validate <name>` passed)
 - **Local testing completed**: `source.sh check`, `discover`, `read` all pass
-- **Schema generated from real data**: `./scripts/generate-schema.sh <name>` run, schemas in manifest
+- **Schema generated from real data**: `./airbyte-toolkit/generate-schema.sh <name>` run, schemas in manifest
 - **All cursor fields exist in schema** (prevents ClickHouse destination NPE)
 - Tenant config (`connections/<tenant>.yaml` with `tenant_id`) and K8s Secrets with credentials
 - Cluster running (`./up.sh` completed)
@@ -30,7 +30,7 @@ If the connector is new, it creates a builder project and publishes a new defini
 ### CDK (Python)
 
 ```bash
-./scripts/build-connector.sh {category}/{name}
+./airbyte-toolkit/build-connector.sh {category}/{name}
 ```
 
 This builds the Docker image, loads it into Kind, and registers/updates the Airbyte source definition.
@@ -101,8 +101,8 @@ Common sync failures:
 - **Source config validation error**: definition mismatch → re-upload manifest, re-run `update-connections.sh`
 - **Breaking schema change** (e.g., renamed primary key): reset and re-deploy:
   ```bash
-  ./scripts/reset-connector.sh <name> <tenant>
-  ./scripts/build-connector.sh <path>          # CDK
+  ./airbyte-toolkit/reset-connector.sh <name> <tenant>
+  ./airbyte-toolkit/build-connector.sh <path>          # CDK
   ./scripts/apply-connections.sh <tenant>
   ./run-sync.sh <name> <tenant>
   ```

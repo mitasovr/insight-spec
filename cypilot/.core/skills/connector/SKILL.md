@@ -31,11 +31,11 @@ Parse the user's command and route to the appropriate workflow:
 
 ## CDK Build
 
-For `/connector build <name>`, run `{INGESTION_DIR}/scripts/build-connector.sh {CONNECTOR_PATH}`. This builds the Docker image, loads it into Kind, and registers/updates the Airbyte source definition. Only for `type: cdk` connectors.
+For `/connector build <name>`, run `{INGESTION_DIR}/airbyte-toolkit/build-connector.sh {CONNECTOR_PATH}`. This builds the Docker image, loads it into Kind, and registers/updates the Airbyte source definition. Only for `type: cdk` connectors.
 
 ## Connector Reset
 
-For `/connector reset <name> <tenant>`, run `{INGESTION_DIR}/scripts/reset-connector.sh {CONNECTOR_NAME} <tenant>`. This deletes the Airbyte connection, source, and definition, drops the Bronze database in ClickHouse, and cleans state files. Use when schema has breaking changes or a full re-sync is needed.
+For `/connector reset <name> <tenant>`, run `{INGESTION_DIR}/airbyte-toolkit/reset-connector.sh {CONNECTOR_NAME} <tenant>`. This deletes the Airbyte connection, source, and definition, drops the Bronze database in ClickHouse, and cleans state files. Use when schema has breaking changes or a full re-sync is needed.
 
 ## Airbyte Logs
 
