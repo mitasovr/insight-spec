@@ -95,7 +95,7 @@ endpoint from DESIGN.md. The following discrepancies still require clarification
 |---|---|---|---|
 | Metric `query_ref` semantics | Each metric below defines a multi-column ClickHouse SQL as `query_ref`; the query endpoint executes it with OData filters applied | `Metric.query_ref` type is `String` but its runtime semantics are unspecified | Confirm `query_ref` holds ClickHouse SQL executed by the query engine, and that `POST /metrics/query` accepts a metric ID to select which `query_ref` to run |
 | Stats / percentiles | §7 Q1 proposes a `/stats` extension for P5/P50/P95 | No stats endpoint in DESIGN.md | Propose addition or find alternative approach |
-| Alert rules | Frontend needs threshold CRUD | Alerts Service at `/api/v1/alerts/rules` (separate microservice) | Frontend queries Alerts Service directly, not Analytics API |
+| Threshold config | Frontend needs threshold CRUD for status computation and "Attention Needed" block (§7 Q2) | No threshold config entity in DESIGN.md; Dashboard `chart_configs` JSON could serve this | Confirm where to store threshold config within Analytics API |
 | Data availability | Proposed inline in query response (see §8) | Connector Manager: `GET /api/v1/connectors/connections/{id}/status` | Frontend may need to fetch `data_availability` from Connector Manager separately |
 | Person profile | §4.6 proposes a seeded metric | Identity Service: `GET /api/v1/identity/persons/{id}` | May use Identity Service directly; no analytics metric needed |
 
@@ -668,12 +668,21 @@ currently specify a stats capability.
 
 ---
 
-### Open Question 2 — Threshold config management
+### Open Question 2 — Threshold and "Attention Needed" config
 
-The frontend needs threshold values to compute `status` locally (per §6). These thresholds
-are per-tenant, configurable by admins.
+The frontend needs two kinds of threshold configuration, both per-tenant, admin-configurable:
 
-**Proposed:** A separate config resource, not co-located in query responses:
+1. **Column thresholds** — to compute `status: good|warn|bad` on table cells (§6).
+   E.g. `build_success_pct >= 90 → good, < 90 → warn`.
+
+2. **Alert thresholds** — to populate the "Attention Needed" block on the Team screen.
+   E.g. "flag member if `focus_time_pct < 40` for 2+ consecutive periods".
+
+Both are purely frontend-applied — the backend stores the config, the frontend fetches
+it and applies locally to the data it already has from the analytics query. This has
+**nothing to do with the Alerts Service** from DESIGN.md (which sends email notifications).
+
+**Proposed:** A config resource within the Analytics API:
 
 ```http
 GET  /api/v1/analytics/config/thresholds
@@ -682,28 +691,9 @@ PUT  /api/v1/analytics/config/thresholds/{id}
 ```
 
 **Questions:**
-- Is `TeamViewConfig` part of the Metric/Dashboard definition in MariaDB, or a separate entity?
+- Is this part of the Dashboard entity (`chart_configs` JSON) or a separate entity?
 - How does the frontend know which threshold set applies to which screen?
-
----
-
-### Open Question 3 — Alert rule management
-
-Alert rules ("Attention Needed" section) need CRUD. Per upstream DESIGN.md, the Alerts
-Service owns this at a separate path — **not** the Analytics API:
-
-```http
-GET    /api/v1/alerts/rules
-POST   /api/v1/alerts/rules
-PUT    /api/v1/alerts/rules/{id}
-DELETE /api/v1/alerts/rules/{id}
-```
-
-**Questions:**
-- Confirm the frontend should query the Alerts Service base URL for rule CRUD
-  (separate from the Analytics API base URL)
-- Is the rule format in the Alerts Service compatible with the `AlertThreshold` type
-  the frontend currently uses?
+- Should column thresholds and alert thresholds be the same entity or separate?
 
 ---
 
@@ -866,7 +856,7 @@ Once `class_ci_runs` is available:
 - [ ] Confirm `Metric.query_ref` holds ClickHouse SQL executed by the query engine
 - [ ] Confirm `POST /metrics/query` accepts a metric UUID to select which `query_ref` to run
 - [ ] Confirm how `$filter` parameters map to `query_ref` placeholders (OData → ClickHouse bind)
-- [ ] Confirm alert rules owned by Alerts Service (`/api/v1/alerts/rules`) — not Analytics API
+- [ ] Confirm threshold config storage within Analytics API (separate entity or Dashboard JSON)
 - [ ] Confirm `data_availability` source: inline in query response or from Connector Manager
 - [ ] Confirm person profile from Identity Service (`GET /api/v1/identity/persons/{id}`)
 
@@ -898,11 +888,8 @@ Once `class_ci_runs` is available:
 ### Backend — Threshold Config (Open Question 2)
 
 - [ ] Threshold config CRUD (GET/POST/PUT) at `/api/v1/analytics/config/thresholds`
-
-### Backend — Alert Rules (Open Question 3)
-
-- [ ] Confirm Alerts Service CRUD at `/api/v1/alerts/rules`
-- [ ] Verify `AlertRule` format is compatible with frontend's `AlertThreshold` type
+- [ ] Decide: separate entity or part of Dashboard `chart_configs` JSON
+- [ ] Column thresholds (status coloring) + alert thresholds ("Attention Needed" block)
 
 ### Backend — Jira connector (unblocks `tasks_closed`, `bugs_fixed`) — **P1 priority**
 
