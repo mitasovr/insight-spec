@@ -65,17 +65,21 @@ else
 fi
 
 # --- ClickHouse ---
-if has_secret clickhouse-credentials data; then
-  echo "  Deploying ClickHouse..."
-  kubectl apply -f k8s/clickhouse/
-  kubectl scale deployment/clickhouse -n data --replicas=1 2>/dev/null || true
-else
-  echo "  SKIP: ClickHouse — Secret 'clickhouse-credentials' not found in namespace 'data'"
-  echo "    Create it:"
-  echo "      kubectl create secret generic clickhouse-credentials -n data --from-literal=password='YOUR_PASSWORD'"
-  echo "    Or: ./secrets/apply.sh"
-  MISSING+=("clickhouse-credentials (namespace: data)")
+# Auto-create credentials secret if it doesn't exist (like Airbyte does)
+if ! has_secret clickhouse-credentials data; then
+  CH_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+  echo "  Creating ClickHouse credentials secret (auto-generated password)..."
+  kubectl create secret generic clickhouse-credentials -n data \
+    --from-literal=username=default \
+    --from-literal=password="$CH_PASS"
+  # ClickHouse password also needed in argo namespace (for dbt jobs)
+  kubectl create secret generic clickhouse-credentials -n argo \
+    --from-literal=username=default \
+    --from-literal=password="$CH_PASS"
 fi
+echo "  Deploying ClickHouse..."
+kubectl apply -f k8s/clickhouse/
+kubectl scale deployment/clickhouse -n data --replicas=1 2>/dev/null || true
 
 # --- Argo Workflows ---
 echo "  Deploying Argo Workflows..."
