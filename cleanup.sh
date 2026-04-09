@@ -22,6 +22,10 @@ pkill -f 'port-forward.*airbyte' 2>/dev/null || true
 
 # Clean ingestion state
 rm -f src/ingestion/airbyte-toolkit/state.yaml 2>/dev/null || true
-rm -rf src/ingestion/workflows/*/  2>/dev/null || true
+# Clean generated tenant workflows (preserve templates/ and schedules/)
+for d in src/ingestion/workflows/*/; do
+  case "$(basename "$d")" in templates|schedules) continue;; esac
+  rm -rf "$d" 2>/dev/null || true
+done
 
 echo "=== Cleaned. Run ./up.sh for fresh install ==="
