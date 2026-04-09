@@ -30,7 +30,7 @@ WITH latest AS (
     SELECT id AS source_id, email, name, tenant_id
     FROM {{ source('bronze_claude_team', 'claude_team_users') }}
     WHERE email IS NOT NULL AND email != ''
-    QUALIFY row_number() OVER (PARTITION BY email ORDER BY _airbyte_extracted_at DESC) = 1
+    QUALIFY row_number() OVER (PARTITION BY lower(trim(email)), coalesce(tenant_id, '') ORDER BY _airbyte_extracted_at DESC) = 1
 ),
 
 observations AS (
