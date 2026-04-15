@@ -73,7 +73,7 @@ Read connector package files and verify each item:
 ```
 === Connector Validation: <name> ===
 
-  Structure:    PASS (4/4)
+  Structure:    PASS (5/5)
   Manifest:     PASS (12/12)  or  CDK: PASS (5/5)
   Descriptor:   PASS (7/7)
   dbt Models:   PASS (7/7)

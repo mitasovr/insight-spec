@@ -32,6 +32,9 @@ WITH resync AS (
         'cursor'                    AS source
     FROM {{ source('bronze_cursor', 'cursor_usage_events_daily_resync') }}
     WHERE toDate(fromUnixTimestamp64Milli(CAST(timestamp AS Int64))) < today()
+    {% if is_incremental() %}
+      AND timestamp >= (SELECT coalesce(max(event_timestamp), '0') FROM {{ this }})
+    {% endif %}
 ),
 
 realtime AS (
@@ -57,11 +60,11 @@ realtime AS (
         'cursor'                    AS source
     FROM {{ source('bronze_cursor', 'cursor_usage_events') }}
     WHERE toDate(fromUnixTimestamp64Milli(CAST(timestamp AS Int64))) = today()
+    {% if is_incremental() %}
+      AND timestamp >= (SELECT coalesce(max(event_timestamp), '0') FROM {{ this }})
+    {% endif %}
 )
 
 SELECT * FROM resync
 UNION ALL
 SELECT * FROM realtime
-{% if is_incremental() %}
-WHERE event_timestamp > (SELECT max(event_timestamp) FROM {{ this }})
-{% endif %}

@@ -16,6 +16,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: insight-cursor-main                          # convention: insight-{connector}-{source-id}
+  namespace: data                                    # connect.sh discovers secrets in this namespace
   labels:
     app.kubernetes.io/part-of: insight
   annotations:
@@ -41,7 +42,7 @@ These fields are set by `airbyte-toolkit/connect.sh` and should NOT be in the Se
 | `insight_tenant_id` | `tenant_id` from tenant YAML |
 | `insight_source_id` | `insight.cyberfabric.com/source-id` annotation |
 
-All connector parameters are in the K8s Secret. Tenant YAML contains only `tenant_id`.
+Connector credentials are stored in the K8s Secret. Platform identifiers (`insight_tenant_id`, `insight_source_id`) are injected separately by `connect.sh` from the tenant YAML and Secret annotations.
 
 ## Streams
 

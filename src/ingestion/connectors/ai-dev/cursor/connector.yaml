@@ -102,7 +102,7 @@ streams:
       - type: AddFields
         fields:
           - path: [unique_key]
-            value: "{{ config['insight_tenant_id'] }}-{{ config['insight_source_id'] }}-{{ record['email'] }}"
+            value: "{{ config['insight_tenant_id'] }}-{{ config['insight_source_id'] }}-{{ record['id'] }}"
 
   # ── Stream 2: cursor_audit_logs (incremental, GET) ──
   - type: DeclarativeStream
@@ -481,7 +481,7 @@ streams:
       - type: AddFields
         fields:
           - path: [unique_key]
-            value: "{{ config['insight_tenant_id'] }}-{{ config['insight_source_id'] }}-{{ record['email'] }}-{{ record['date'] }}"
+            value: "{{ config['insight_tenant_id'] }}-{{ config['insight_source_id'] }}-{{ record['userId'] }}-{{ record['date'] }}"
     incremental_sync:
       type: DatetimeBasedCursor
       cursor_field: date
