@@ -8,7 +8,6 @@ Performance optimizations (all in stream_slices, single-threaded):
 5. Force-push detection: reset cursor when HEAD changes
 """
 
-import atexit
 import logging
 import os
 import re
@@ -54,14 +53,13 @@ class CommitsStream(BitbucketCloudRestStream):
         self._current_stop_at_sha: Optional[str] = None
 
         self._stop_pagination: bool = False
-        self._seen_hashes: dict[str, str] = {}  # sha → "workspace/slug"
+        self._seen_hashes: dict[str, str] = {}  # sha → "workspace/slug" (cleared per-repo, unbounded within repo)
         self._deferred_state_updates: dict[str, dict] = {}  # partition_key → state entry
         # Temp file for passing commit metadata to file_changes (near-zero memory).
         self._commit_meta_file = tempfile.NamedTemporaryFile(
             mode="w", prefix="insight_bb_commits_meta_", suffix=".tsv", delete=False,
         )
         self._commit_meta_path = self._commit_meta_file.name
-        atexit.register(lambda p=self._commit_meta_path: os.unlink(p) if os.path.exists(p) else None)
         self._commit_meta_count: int = 0
         logger.info(f"Commit metadata temp file: {self._commit_meta_path}")
 
@@ -81,6 +79,8 @@ class CommitsStream(BitbucketCloudRestStream):
         return {"pagelen": str(self._page_size)}
 
     def read_records(self, sync_mode=None, stream_slice=None, stream_state=None, **kwargs):
+        # Self-iterates slices to support per-partition error handling (freeze cursor
+        # on failure, continue sync). Bypasses CDK slice iteration intentionally.
         if stream_slice is None:
             for branch_slice in self.stream_slices(stream_state=stream_state):
                 try:

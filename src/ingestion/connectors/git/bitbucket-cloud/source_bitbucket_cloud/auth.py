@@ -6,14 +6,14 @@ import base64
 def auth_headers(token: str, username: str = "") -> dict:
     """Build authentication headers for Bitbucket Cloud API requests.
 
-    Bitbucket personal API tokens require Basic Auth (username:token).
-    Workspace access tokens use Bearer auth (no username needed).
+    Both personal API tokens and workspace access tokens use Basic Auth.
+    Personal tokens require username:token. Workspace tokens use
+    an arbitrary username (defaults to "x-token-auth") with the token as password.
     """
-    if username:
-        credentials = base64.b64encode(f"{username}:{token}".encode()).decode()
-        auth_value = f"Basic {credentials}"
-    else:
-        auth_value = f"Bearer {token}"
+    if not username:
+        username = "x-token-auth"
+    credentials = base64.b64encode(f"{username}:{token}".encode()).decode()
+    auth_value = f"Basic {credentials}"
 
     return {
         "Authorization": auth_value,

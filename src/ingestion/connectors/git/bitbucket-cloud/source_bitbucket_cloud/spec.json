@@ -23,14 +23,14 @@
       "bitbucket_username": {
         "type": "string",
         "title": "Username / Email",
-        "description": "Bitbucket username or email address. Required for personal API tokens (Basic Auth). Leave empty for workspace access tokens (Bearer Auth).",
+        "description": "Bitbucket username or email address. Required for personal API tokens. Optional for workspace access tokens (defaults to x-token-auth).",
         "default": "",
         "order": 2
       },
       "bitbucket_token": {
         "type": "string",
         "title": "API Token",
-        "description": "Bitbucket Cloud API token. For personal tokens, also provide your username/email above. Workspace access tokens work without a username.",
+        "description": "Bitbucket Cloud API token (personal or workspace access token). For personal tokens, also provide your username/email.",
         "airbyte_secret": true,
         "order": 3
       },

@@ -59,6 +59,8 @@ class PullRequestsStream(BitbucketCloudRestStream):
     # ------------------------------------------------------------------
 
     def read_records(self, sync_mode=None, stream_slice=None, stream_state=None, **kwargs):
+        # Self-iterates slices to support per-partition error handling (freeze cursor
+        # on failure, continue sync). Bypasses CDK slice iteration intentionally.
         if stream_slice is None:
             for repo_slice in self.stream_slices(stream_state=stream_state):
                 self._current_cursor_value = None  # reset between slices

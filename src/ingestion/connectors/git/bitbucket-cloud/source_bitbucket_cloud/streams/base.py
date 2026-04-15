@@ -137,6 +137,10 @@ class BitbucketCloudRestStream(HttpStream, ABC):
             logger.warning(f"Resource not found (404): {response.url}")
             return
 
+        if response.status_code >= 400:
+            logger.error(f"Unexpected HTTP {response.status_code}: {response.url} — {response.text[:200]}")
+            return
+
         data = response.json()
         records = data.get("values", [])
         for record in records:
@@ -163,6 +167,7 @@ class BitbucketCloudRestStream(HttpStream, ABC):
             logger.info("Bitbucket rate limit pressure relieved, resuming normal speed")
 
         if BitbucketCloudRestStream._near_limit_active:
+            logger.info(f"Rate limit near — sleeping {self._near_limit_backoff}s")
             time.sleep(self._near_limit_backoff)
 
     def _add_envelope(self, record: dict, pk_parts: Optional[list] = None) -> dict:

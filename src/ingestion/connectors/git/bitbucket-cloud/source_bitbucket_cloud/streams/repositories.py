@@ -1,6 +1,5 @@
 """Bitbucket Cloud repositories stream (REST, full refresh)."""
 
-import atexit
 import json
 import logging
 import os
@@ -31,7 +30,6 @@ class RepositoriesStream(BitbucketCloudRestStream):
             mode="w", prefix="insight_bb_repos_", suffix=".jsonl", delete=False,
         )
         self._child_records_path = self._child_records_file.name
-        atexit.register(lambda p=self._child_records_path: os.unlink(p) if os.path.exists(p) else None)
 
     def _path(self, stream_slice: Optional[Mapping[str, Any]] = None, **kwargs) -> str:
         workspace = (stream_slice or {}).get("workspace", "")
