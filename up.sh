@@ -4,7 +4,7 @@
 # Components:
 #   1. Kind cluster + ingress-nginx
 #   2. Ingestion (Airbyte, ClickHouse, Argo)
-#   3. Backend  (API Gateway)
+#   3. Backend  (Analytics API, API Gateway)
 #   4. Frontend (SPA)
 #
 # Usage:
@@ -89,12 +89,37 @@ if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "backend
     kind load docker-image insight-api-gateway:local --name "${CLUSTER_NAME}"
   fi
 
+  echo "=== Building Analytics API ==="
+  docker build -t insight-analytics-api:local \
+    -f src/backend/services/analytics-api/Dockerfile \
+    src/backend/
+
+  if [[ "$ENV" == "local" ]]; then
+    kind load docker-image insight-analytics-api:local --name "${CLUSTER_NAME}"
+  fi
+
+  echo "=== Deploying Analytics API ==="
+  helm upgrade --install insight-analytics src/backend/services/analytics-api/helm/ \
+    --namespace insight \
+    --set image.repository=insight-analytics-api \
+    --set image.tag=local \
+    --set image.pullPolicy=IfNotPresent \
+    --set database.url="mysql://insight:insight-pass@insight-mariadb:3306/analytics" \
+    --set clickhouse.url="http://clickhouse.data.svc.cluster.local:8123" \
+    --set clickhouse.database=insight \
+    --set redis.url="redis://insight-redis-master:6379" \
+    --set identityResolution.url="http://localhost:9999" \
+    --wait --timeout 3m
+
   echo "=== Deploying API Gateway ==="
   GW_HELM_ARGS=(
     --namespace insight
     --set image.repository=insight-api-gateway
     --set image.tag=local
     --set image.pullPolicy=IfNotPresent
+    --set proxy.routes[0].prefix=/analytics
+    --set proxy.routes[0].upstream=http://insight-analytics-analytics-api:8081
+    --set proxy.routes[0].public=false
     --wait --timeout 3m
   )
   if [[ "$ENV" == "local" ]]; then
@@ -134,7 +159,8 @@ echo "  To use:     export KUBECONFIG=${KUBECONFIG}"
 echo ""
 echo "  Services:"
 echo "    Frontend:   http://localhost:8000"
-echo "    API:        http://localhost:8000/api/v1"
+echo "    API:        http://localhost:8000/api"
+echo "    Analytics:  http://localhost:8000/api/analytics/v1/metrics (via gateway)"
 echo "    Airbyte:    http://localhost:8001"
 echo "    Argo UI:    http://localhost:30500"
 echo "    ClickHouse: http://localhost:30123"
