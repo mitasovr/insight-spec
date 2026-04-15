@@ -14,6 +14,7 @@ Read connector package files and verify each item:
 ### Structure
 - [ ] `connector.yaml` exists (nocode) or `Dockerfile` + `source_<name>/source.py` exists (CDK)
 - [ ] `descriptor.yaml` exists with required fields (name, version, type, schedule, workflow, dbt_select, connection.namespace)
+- [ ] `README.md` exists with prerequisites, K8s Secret fields, streams table, and multi-instance example
 - [ ] K8s Secret example in `secrets/connectors/<name>.yaml.example` with `insight_source_id` annotation
 - [ ] `dbt/` directory with at least one .sql model and schema.yml
 
