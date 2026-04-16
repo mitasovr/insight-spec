@@ -317,7 +317,7 @@ Activity records use `(insight_source_id, page_id, user_id, date, data_source)` 
 
 The Airbyte sync mode for `wiki_pages` and `wiki_spaces` **MUST** be **Incremental | Append + Deduped** (upsert semantics). The `wiki_page_activity` stream **MUST** use **Incremental | Append + Deduped** with the composite key. The `wiki_users` stream **MUST** use **Full Refresh | Append** with SCD Type 2 handling.
 
-Every record **MUST** be deduplicated deterministically at the destination: later records supersede earlier ones for the same `unique_key`. In Phase 1 this is satisfied by Airbyte's destination framework, which auto-generates `_airbyte_extracted_at` (DateTime64, per-write timestamp) on every row and creates the table as `ReplacingMergeTree(_airbyte_extracted_at) ORDER BY unique_key`. No custom `_version` field is emitted by the manifest — project-wide convention shared with other nocode connectors (jira, zoom). See DESIGN §3.7.
+Every record **MUST** be deduplicated deterministically at the destination: later records supersede earlier ones for the same `unique_key`. In Phase 1 this is satisfied by Airbyte's destination framework, which auto-generates `_airbyte_extracted_at` (DateTime64, per-write timestamp) on every row and creates the table as `ReplacingMergeTree(_airbyte_extracted_at) ORDER BY unique_key`. No custom `_version` field is emitted by the manifest — project-wide convention shared with other no-code connectors (jira, zoom). See DESIGN §3.7.
 
 **Rationale**: Without upsert semantics, overlapping incremental windows produce duplicate rows. URN keys provide unambiguous cross-instance identity. The framework-managed `_airbyte_extracted_at` ensures deterministic merge resolution at the destination layer.
 
