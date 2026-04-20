@@ -1,96 +1,172 @@
-"""Bitbucket Cloud branches stream (REST, full refresh, child of repositories)."""
+"""Bitbucket Cloud branches stream (incremental by target.date, HttpSubStream of repositories)."""
 
-import json
 import logging
-import os
-import tempfile
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Iterable, Mapping, MutableMapping, Optional
 
-from source_bitbucket_cloud.streams.base import BitbucketCloudRestStream, _make_unique_key
-from source_bitbucket_cloud.streams.repositories import RepositoriesStream
+from airbyte_cdk.models import SyncMode
+from airbyte_cdk.sources.streams.http import HttpSubStream
+
+from source_bitbucket_cloud.streams.base import BitbucketCloudStream, _make_unique_key
 
 logger = logging.getLogger("airbyte")
 
 
-class BranchesStream(BitbucketCloudRestStream):
-    """Fetches branches for each repository."""
+class BranchesStream(HttpSubStream, BitbucketCloudStream):
+    """Branches for each repository.
+
+    Incremental per-repo cursor on ``target_date`` (latest commit date on branch).
+    Having cursor_field skips the CDK auto-assigned ResumableFullRefreshCursor so
+    the commits stream can re-iterate branches as a parent via HttpSubStream.
+
+    Deleted branches are not re-emitted (no API signal). This is acceptable: bronze
+    is a data lake, keeping historical branch rows is desirable.
+    """
 
     name = "branches"
+    cursor_field = "target_date"
     use_cache = True
+    state_checkpoint_interval = 500
 
-    def __init__(self, parent: RepositoriesStream, **kwargs):
-        super().__init__(**kwargs)
-        self._parent = parent
-        self._child_records_file = tempfile.NamedTemporaryFile(
-            mode="w", prefix="insight_bb_branches_", suffix=".jsonl", delete=False,
-        )
-        self._child_records_path = self._child_records_file.name
+    def __init__(self, parent, **kwargs: Any) -> None:
+        super().__init__(parent=parent, **kwargs)
+        self._stop_pagination: bool = False
 
-    def _path(self, stream_slice: Optional[Mapping[str, Any]] = None, **kwargs) -> str:
+    def _path(self, stream_slice: Optional[Mapping[str, Any]] = None) -> str:
         s = stream_slice or {}
-        workspace = s.get("workspace", "")
-        slug = s.get("slug", "")
-        if not workspace or not slug:
-            raise ValueError("BranchesStream._path() called without workspace/slug in stream_slice")
-        return f"repositories/{workspace}/{slug}/refs/branches"
+        repo = s["parent"]
+        return f"repositories/{repo['workspace']}/{repo['slug']}/refs/branches"
 
-    def stream_slices(self, **kwargs) -> Iterable[Optional[Mapping[str, Any]]]:
-        for record in self._parent.get_child_records():
-            workspace = record.get("workspace", "")
-            slug = record.get("slug", "")
-            mainbranch_name = record.get("mainbranch_name", "")
-            updated_on = record.get("updated_on", "")
-            if workspace and slug:
+    def stream_slices(
+        self,
+        sync_mode: SyncMode,
+        cursor_field: Optional[list] = None,
+        stream_state: Optional[Mapping[str, Any]] = None,
+    ) -> Iterable[Optional[Mapping[str, Any]]]:
+        # Iterate parent via stream_slices + read_records directly (not via
+        # HttpSubStream/read_only_records) — Stream.read() in CDK 7.x overrides
+        # the incoming stream_state with self.state (parent's persistent cursor),
+        # which skips slices that the child still needs to process after a
+        # mid-stream crash. read_records() honours the passed stream_state.
+        state = stream_state or {}
+        slice_count = 0
+        for repo_slice in self.parent.stream_slices(
+            sync_mode=SyncMode.full_refresh, cursor_field=None, stream_state={},
+        ):
+            for repo_record in self.parent.read_records(
+                sync_mode=SyncMode.full_refresh,
+                stream_slice=repo_slice,
+                stream_state={},
+            ):
+                if not isinstance(repo_record, Mapping):
+                    continue
+                workspace = repo_record.get("workspace")
+                slug = repo_record.get("slug")
+                if not workspace or not slug:
+                    continue
+                partition_key = f"{workspace}/{slug}"
+                cursor = (state.get(partition_key, {}) or {}).get(self.cursor_field, "") or ""
+                self._stop_pagination = False
+                slice_count += 1
                 yield {
-                    "workspace": workspace,
-                    "slug": slug,
-                    "mainbranch_name": mainbranch_name,
-                    "updated_on": updated_on,
+                    "parent": repo_record,
+                    "cursor_value": cursor,
+                    "partition_key": partition_key,
                 }
+        logger.info(f"branches: iterated {slice_count} repo slices")
 
-    def parse_response(self, response, stream_slice=None, **kwargs):
+    def request_params(
+        self,
+        stream_state: Optional[Mapping[str, Any]] = None,
+        stream_slice: Optional[Mapping[str, Any]] = None,
+        next_page_token: Optional[Mapping[str, Any]] = None,
+    ) -> Mapping[str, Any]:
+        if next_page_token:
+            return {}
+        params: dict[str, Any] = {
+            "pagelen": str(self.page_size),
+            "sort": "-target.date",
+        }
+        cursor = (stream_slice or {}).get("cursor_value", "") or ""
+        if cursor:
+            params["q"] = f'target.date>"{cursor}"'
+        return params
+
+    def next_page_token(self, response):
+        if self._stop_pagination:
+            self._stop_pagination = False
+            return None
+        return super().next_page_token(response)
+
+    def parse_response(
+        self,
+        response,
+        stream_slice: Optional[Mapping[str, Any]] = None,
+        **kwargs: Any,
+    ):
         s = stream_slice or {}
-        workspace = s.get("workspace", "")
-        slug = s.get("slug", "")
-        if not self._guard_response(response):
-            return
-        data = response.json()
-        branches = data.get("values", [])
-        for branch in branches:
+        repo = s["parent"]
+        workspace = repo["workspace"]
+        slug = repo["slug"]
+        default_branch_name = repo.get("mainbranch_name", "")
+        repo_updated_on = repo.get("updated_on", "")
+        cursor_value = s.get("cursor_value", "") or ""
+        emitted = 0
+
+        for branch in self._iter_values(response):
             branch_name = branch.get("name", "")
             target = branch.get("target") or {}
             target_hash = target.get("hash", "")
+            target_date = target.get("date", "") or ""
 
-            branch["unique_key"] = _make_unique_key(
-                self._tenant_id, self._source_id, workspace, slug, branch_name,
-            )
-            branch["workspace"] = workspace
-            branch["repo_slug"] = slug
-            branch["mainbranch_name"] = s.get("mainbranch_name", "")
-            branch["updated_on"] = s.get("updated_on", "")
+            if cursor_value and target_date and target_date <= cursor_value:
+                self._stop_pagination = True
+                logger.info(
+                    f"branches: {workspace}/{slug} cursor early-exit at "
+                    f"target_date={target_date} cursor={cursor_value}"
+                )
+                return
+            emitted += 1
 
-            # Write minimal child data to disk for commits stream
-            self._child_records_file.write(json.dumps({
+            record = {
+                "unique_key": _make_unique_key(
+                    self._tenant_id, self._source_id, workspace, slug, branch_name,
+                ),
                 "name": branch_name,
+                "target": target,
+                "target_hash": target_hash,
+                "target_date": target_date,
                 "workspace": workspace,
                 "repo_slug": slug,
-                "mainbranch_name": s.get("mainbranch_name", ""),
-                "updated_on": s.get("updated_on", ""),
-                "target_hash": target_hash,
-            }, separators=(",", ":")) + "\n")
-            yield self._add_envelope(branch)
+                "mainbranch_name": default_branch_name,
+                "default_branch_name": default_branch_name,
+                "is_default": branch_name == default_branch_name,
+                "updated_on": repo_updated_on,
+            }
+            yield self._envelope(record)
 
-    def get_child_records(self) -> Iterable:
-        """Yield branch records from disk. Zero memory, zero API calls."""
-        if self._child_records_file and not self._child_records_file.closed:
-            self._child_records_file.close()
-        if not os.path.exists(self._child_records_path):
-            return
-        with open(self._child_records_path, "r") as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if line:
-                    yield json.loads(line)
+        logger.debug(
+            f"branches: repo={workspace}/{slug} page_emitted={emitted}"
+        )
+
+    def get_updated_state(
+        self,
+        current_stream_state: MutableMapping[str, Any],
+        latest_record: Mapping[str, Any],
+    ) -> MutableMapping[str, Any]:
+        workspace = latest_record.get("workspace", "")
+        slug = latest_record.get("repo_slug", "")
+        if not workspace or not slug:
+            return current_stream_state
+        partition_key = f"{workspace}/{slug}"
+        target_date = latest_record.get(self.cursor_field, "") or ""
+        if not target_date:
+            return current_stream_state
+        entry = dict(current_stream_state.get(partition_key, {}) or {})
+        prev = entry.get(self.cursor_field, "") or ""
+        if target_date > prev:
+            entry[self.cursor_field] = target_date
+            current_stream_state[partition_key] = entry
+        return current_stream_state
 
     def get_json_schema(self) -> Mapping[str, Any]:
         return {
@@ -105,9 +181,13 @@ class BranchesStream(BitbucketCloudRestStream):
                 "collected_at": {"type": "string"},
                 "name": {"type": ["null", "string"]},
                 "target": {"type": ["null", "object"]},
+                "target_hash": {"type": ["null", "string"]},
+                "target_date": {"type": ["null", "string"]},
                 "workspace": {"type": "string"},
                 "repo_slug": {"type": "string"},
                 "mainbranch_name": {"type": ["null", "string"]},
+                "default_branch_name": {"type": ["null", "string"]},
+                "is_default": {"type": ["null", "boolean"]},
                 "updated_on": {"type": ["null", "string"]},
             },
         }
