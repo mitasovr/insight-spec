@@ -9,3 +9,4 @@ Domain-level specifications for the Insight platform. Each domain represents a b
 | [`ingestion/`](ingestion/) | Data pipeline from source APIs to Silver step 1 (Airbyte + Argo Workflows + dbt) | Accepted |
 | [`connector/`](connector/) | Connector development: Insight Connector packages, nocode and CDK patterns, packaging, debugging | Accepted |
 | [`identity-resolution/`](identity-resolution/) | Person identity matching and resolution across sources | Proposed |
+| [`deploy/`](deploy/) | Deployment architecture: Helm packaging, environment configuration, multi-environment orchestration | Proposed |
