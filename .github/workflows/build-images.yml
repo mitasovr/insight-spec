@@ -6,11 +6,19 @@ on:
     paths:
       - "src/backend/**"
       - "src/ingestion/**"
+      - ".github/workflows/build-images.yml"
   pull_request:
     branches: [main]
     paths:
       - "src/backend/**"
       - "src/ingestion/**"
+      - ".github/workflows/build-images.yml"
+  workflow_dispatch:
+    inputs:
+      build_all:
+        description: "Build all images regardless of changes"
+        type: boolean
+        default: true
 
 env:
   REGISTRY: ghcr.io
@@ -39,7 +47,7 @@ jobs:
 
   backend:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -73,7 +81,7 @@ jobs:
         with:
           context: src/backend
           file: src/backend/${{ matrix.dockerfile }}
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -81,7 +89,7 @@ jobs:
 
   toolbox:
     needs: changes
-    if: needs.changes.outputs.ingestion == 'true'
+    if: needs.changes.outputs.ingestion == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -106,7 +114,7 @@ jobs:
         with:
           context: src/ingestion
           file: src/ingestion/tools/toolbox/Dockerfile
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
