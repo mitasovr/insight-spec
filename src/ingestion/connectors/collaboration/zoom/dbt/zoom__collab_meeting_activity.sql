@@ -57,7 +57,7 @@ SELECT
     CAST(NULL AS Nullable(String)) AS report_period,
     now() AS collected_at,
     'insight_zoom' AS data_source,
-    toUnixTimestamp64Milli(now()) AS _version
+    toUnixTimestamp64Milli(now64()) AS _version
 FROM {{ source('bronze_zoom', 'participants') }} p
 LEFT JOIN {{ source('bronze_zoom', 'meetings') }} m
     ON p.meeting_uuid = m.uuid

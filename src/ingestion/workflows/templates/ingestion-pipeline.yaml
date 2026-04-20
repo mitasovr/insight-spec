@@ -86,8 +86,8 @@ spec:
                 - name: clickhouse_port
                   value: "{{inputs.parameters.clickhouse_port}}"
 
-          # ------ Non-Jira: legacy single-dbt path ------
-          - name: transform-legacy
+          # ------ Non-Jira: single dbt step ------
+          - name: transform
             depends: sync
             when: "'{{inputs.parameters.data_source}}' != 'jira'"
             templateRef:
