@@ -254,7 +254,7 @@ src/ingestion/
 │       ├── credentials.yaml.example #   Credential template (tracked)
 │       ├── schemas/                 #   Generated JSON schemas (gitignored)
 │       └── dbt/
-│           ├── m365__comms_events.sql  # Bronze → Staging model
+│           ├── m365__collab_*.sql       # Bronze → Staging models
 │           └── schema.yml              # Source + tests
 │
 ├── connections/                     # Tenant configs
@@ -278,7 +278,7 @@ src/ingestion/
 ├── silver/                          # Silver layer, split by domain
 │   ├── _shared/                     #   Cross-domain (class_people, bootstrap_inputs)
 │   ├── git/                         #   class_git_* union models
-│   ├── collaboration/               #   class_comms_events
+│   ├── collaboration/               #   class_collab_* (chat, meeting, email, document)
 │   └── crm/                         #   class_crm_*
 │
 ├── workflows/

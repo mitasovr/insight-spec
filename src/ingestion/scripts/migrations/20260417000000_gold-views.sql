@@ -5,7 +5,7 @@
 -- Prerequisites:
 --   - Database `insight` exists
 --   - Bronze databases: bronze_bamboohr, bronze_jira, bronze_m365, bronze_zoom
---   - Table: silver.class_comms_events
+--   - Tables: staging.m365__collab_email_activity, staging.m365__collab_meeting_activity, etc.
 
 -- =====================================================================
 -- 1. PEOPLE — deduped person lookup from BambooHR
@@ -138,15 +138,15 @@ SELECT
     sum(files_shared)     AS files_shared
 FROM (
     SELECT
-        lower(user_email) AS person_id,
-        toDate(activity_date) AS metric_date,
-        toFloat64(emails_sent) AS emails_sent,
+        lower(person_key) AS person_id,
+        date AS metric_date,
+        toFloat64(sent_count) AS emails_sent,
         toFloat64(0) AS zoom_calls,
         toFloat64(0) AS meeting_hours,
         toFloat64(0) AS teams_messages,
         toFloat64(0) AS teams_meetings,
         toFloat64(0) AS files_shared
-    FROM silver.class_comms_events
+    FROM staging.m365__collab_email_activity
     UNION ALL
     SELECT
         lower(p.email) AS person_id,
@@ -195,12 +195,12 @@ GROUP BY person_id, metric_date;
 -- =====================================================================
 CREATE VIEW IF NOT EXISTS insight.email_daily AS
 SELECT
-    lower(user_email) AS person_id,
-    activity_date     AS metric_date,
-    lower(user_email) AS user_email,
-    emails_sent,
-    source
-FROM silver.class_comms_events;
+    lower(person_key) AS person_id,
+    date              AS metric_date,
+    lower(person_key) AS user_email,
+    sent_count        AS emails_sent,
+    data_source       AS source
+FROM staging.m365__collab_email_activity;
 
 -- =====================================================================
 -- 8. ZOOM PERSON DAILY — backward compat
