@@ -1,0 +1,82 @@
+{{ config(
+    materialized='table',
+    alias='jira_changelog_items',
+    schema='staging',
+    engine='MergeTree()',
+    order_by='(insight_source_id, id_readable, created_at, changelog_id, field_id)',
+    settings={'allow_nullable_key': 1},
+    tags=['staging', 'jira']
+) }}
+
+-- Materialized as `table` (not `incremental`) so every dbt run rewrites staging from scratch.
+-- Rationale: bronze already dedups via ReplacingMergeTree; incremental `append` here would
+-- accumulate identical rows across runs (3 runs = 3x the storage) without added value.
+
+-- Explode `bronze_jira.jira_issue_history.items` JSON array into one row per field change.
+-- Consumed by `jira-enrich` Rust binary (reads from staging.jira_changelog_items).
+--
+-- Each history row has `changelog_id` and a JSON array `items` with elements shaped like:
+--   { "field": "...", "fieldId": "...", "from": "...", "fromString": "...",
+--     "to": "...", "toString": "..." }
+--
+-- ClickHouse strategy: arrayJoin() on JSONExtractArrayRaw, then JSONExtract* on each element.
+
+WITH exploded AS (
+    SELECT
+        COALESCE(h.source_id, '')                                AS insight_source_id,
+        COALESCE(h.tenant_id, '')                                AS tenant_id,
+        COALESCE(h.id_readable, '')                              AS id_readable,
+        COALESCE(toString(h.changelog_id), '')                   AS changelog_id,
+        COALESCE(parseDateTime64BestEffortOrNull(h.created_at, 3), toDateTime64(0, 3)) AS created_at,
+        h.author_account_id                                      AS author_account_id,
+        arrayJoin(JSONExtractArrayRaw(COALESCE(h.items, '[]')))  AS item_raw
+    FROM {{ source('bronze_jira', 'jira_issue_history') }} h FINAL
+    WHERE h.items IS NOT NULL AND h.items != '[]'
+),
+parsed AS (
+    SELECT
+        insight_source_id,
+        tenant_id,
+        id_readable,
+        changelog_id,
+        created_at,
+        author_account_id,
+        JSONExtractString(item_raw, 'fieldId')                 AS field_id,
+        JSONExtractString(item_raw, 'field')                   AS field_name,
+        nullIf(JSONExtractString(item_raw, 'from'), '')        AS value_from,
+        nullIf(JSONExtractString(item_raw, 'fromString'), '')  AS value_from_string,
+        nullIf(JSONExtractString(item_raw, 'to'), '')          AS value_to,
+        nullIf(JSONExtractString(item_raw, 'toString'), '')    AS value_to_string
+    FROM exploded
+    -- Jira sometimes emits phantom changelog items with `fieldId=""` (typically system-level
+    -- events like "WorklogId"/"RemoteIssueLink" that don't have a proper field mapping). The
+    -- enrich binary drops them at runtime with a WARN; filter them here to keep the warning
+    -- log quiet and save a wire round-trip.
+    WHERE JSONExtractString(item_raw, 'fieldId') != ''
+)
+-- Dedup duplicates within a single changelog: Jira sometimes emits the same (fieldId, from/to)
+-- twice in one items[] array. Group by the natural content-identity key.
+SELECT
+    insight_source_id,
+    any(tenant_id)          AS tenant_id,
+    id_readable,
+    changelog_id,
+    any(created_at)         AS created_at,
+    any(author_account_id)  AS author_account_id,
+    field_id,
+    any(field_name)         AS field_name,
+    value_from,
+    value_from_string,
+    value_to,
+    value_to_string,
+    toUnixTimestamp64Milli(now64(3))                           AS _version
+FROM parsed
+GROUP BY
+    insight_source_id,
+    id_readable,
+    changelog_id,
+    field_id,
+    value_from,
+    value_from_string,
+    value_to,
+    value_to_string
