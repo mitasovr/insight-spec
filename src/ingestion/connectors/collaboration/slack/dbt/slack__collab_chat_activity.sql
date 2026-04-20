@@ -35,7 +35,7 @@ SELECT
     CAST(NULL AS Nullable(String)) AS report_period,
     now() AS collected_at,
     'insight_slack' AS data_source,
-    toUnixTimestamp64Milli(now()) AS _version
+    toUnixTimestamp64Milli(now64()) AS _version
 FROM {{ source('bronze_slack', 'messages') }} m
 LEFT JOIN {{ source('bronze_slack', 'channels') }} c
     ON m.channel_id = c.channel_id
