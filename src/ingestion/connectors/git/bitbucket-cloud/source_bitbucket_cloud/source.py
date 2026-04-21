@@ -86,8 +86,10 @@ class SourceBitbucketCloud(AbstractSource):
         start_date = config.get("bitbucket_start_date")
         skip_forks = config.get("bitbucket_skip_forks", True)
 
-        repos = RepositoriesStream(workspaces=workspaces, skip_forks=skip_forks, **shared)
-        branches = BranchesStream(parent=repos, **shared)
+        repos = RepositoriesStream(
+            workspaces=workspaces, skip_forks=skip_forks, start_date=start_date, **shared,
+        )
+        branches = BranchesStream(parent=repos, start_date=start_date, **shared)
         commits = CommitsStream(parent=branches, start_date=start_date, **shared)
         file_changes = FileChangesStream(parent=commits, start_date=start_date, **shared)
         prs = PullRequestsStream(parent=repos, start_date=start_date, **shared)

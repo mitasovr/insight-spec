@@ -5,7 +5,11 @@ from typing import Any, Iterable, Mapping, MutableMapping, Optional
 
 from airbyte_cdk.models import SyncMode
 
-from source_bitbucket_cloud.streams.base import BitbucketCloudStream, _make_unique_key
+from source_bitbucket_cloud.streams.base import (
+    BitbucketCloudStream,
+    _make_unique_key,
+    _normalize_start_date,
+)
 
 logger = logging.getLogger("airbyte")
 
@@ -37,11 +41,13 @@ class RepositoriesStream(BitbucketCloudStream):
         self,
         workspaces: list[str],
         skip_forks: bool = True,
+        start_date: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._workspaces = workspaces
         self._skip_forks = skip_forks
+        self._start_date = _normalize_start_date(start_date)
         self._stop_pagination: bool = False
 
     def stream_slices(
@@ -81,9 +87,11 @@ class RepositoriesStream(BitbucketCloudStream):
             "pagelen": str(self.page_size),
             "sort": "-updated_on",
         }
+        # Cursor wins; start_date fallback applies only on first run (no cursor).
         cursor = (stream_slice or {}).get("cursor_value", "") or ""
-        if cursor:
-            params["q"] = f'updated_on>"{cursor}"'
+        q_date = cursor or self._start_date
+        if q_date:
+            params["q"] = f'updated_on>"{q_date}"'
         return params
 
     def next_page_token(self, response):

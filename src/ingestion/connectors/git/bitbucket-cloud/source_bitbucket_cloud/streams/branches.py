@@ -6,7 +6,11 @@ from typing import Any, Iterable, Mapping, MutableMapping, Optional
 from airbyte_cdk.models import SyncMode
 from airbyte_cdk.sources.streams.http import HttpSubStream
 
-from source_bitbucket_cloud.streams.base import BitbucketCloudStream, _make_unique_key
+from source_bitbucket_cloud.streams.base import (
+    BitbucketCloudStream,
+    _make_unique_key,
+    _normalize_start_date,
+)
 from source_bitbucket_cloud.streams.repositories import RepositoriesStream
 
 logger = logging.getLogger("airbyte")
@@ -32,12 +36,18 @@ class BranchesStream(HttpSubStream, BitbucketCloudStream):
     # records. State persists only at slice (per-repo) boundaries.
     state_checkpoint_interval = None
 
-    def __init__(self, parent: RepositoriesStream, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        parent: RepositoriesStream,
+        start_date: Optional[str] = None,
+        **kwargs: Any,
+    ) -> None:
         """Parent slice records must carry: workspace, slug, mainbranch_name,
         updated_on. Parse failures here produce clear KeyError at parse_response
         rather than silent data issues downstream.
         """
         super().__init__(parent=parent, **kwargs)
+        self._start_date = _normalize_start_date(start_date)
         self._stop_pagination: bool = False
 
     def _path(self, stream_slice: Optional[Mapping[str, Any]] = None) -> str:
@@ -95,9 +105,11 @@ class BranchesStream(HttpSubStream, BitbucketCloudStream):
             "pagelen": str(self.page_size),
             "sort": "-target.date",
         }
+        # Cursor wins; start_date fallback applies only on first run (no cursor).
         cursor = (stream_slice or {}).get("cursor_value", "") or ""
-        if cursor:
-            params["q"] = f'target.date>"{cursor}"'
+        q_date = cursor or self._start_date
+        if q_date:
+            params["q"] = f'target.date>"{q_date}"'
         return params
 
     def next_page_token(self, response):
