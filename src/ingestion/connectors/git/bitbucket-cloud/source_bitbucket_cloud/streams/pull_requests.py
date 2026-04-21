@@ -6,7 +6,12 @@ from typing import Any, Iterable, Mapping, MutableMapping, Optional
 from airbyte_cdk.models import SyncMode
 from airbyte_cdk.sources.streams.http import HttpSubStream
 
-from source_bitbucket_cloud.streams.base import BitbucketCloudStream, _make_unique_key
+from source_bitbucket_cloud.streams.base import (
+    BitbucketCloudStream,
+    _make_unique_key,
+    _normalize_start_date,
+    _truncate,
+)
 
 
 logger = logging.getLogger("airbyte")
@@ -23,7 +28,11 @@ class PullRequestsStream(HttpSubStream, BitbucketCloudStream):
     name = "pull_requests"
     cursor_field = "updated_on"
     use_cache = True
-    state_checkpoint_interval = 500
+    # Descending API sort (sort=-updated_on): mid-slice checkpointing would
+    # persist the NEWEST cursor after record #1 and a crash before slice
+    # completion would cause the next run to skip all remaining (older)
+    # records. State persists only at slice (per-repo) boundaries.
+    state_checkpoint_interval = None
 
     # PRs API doesn't accept a generic ``pagelen`` for big pages — keep 50.
     page_size = 50
@@ -35,7 +44,7 @@ class PullRequestsStream(HttpSubStream, BitbucketCloudStream):
         **kwargs: Any,
     ) -> None:
         super().__init__(parent=parent, **kwargs)
-        self._start_date = start_date
+        self._start_date = _normalize_start_date(start_date)
         self._stop_pagination: bool = False
 
     # ------------------------------------------------------------------
@@ -163,7 +172,6 @@ class PullRequestsStream(HttpSubStream, BitbucketCloudStream):
             src_branch = (pr.get("source") or {}).get("branch") or {}
             dst_branch = (pr.get("destination") or {}).get("branch") or {}
             merge_commit = pr.get("merge_commit") or {}
-            closed_by = pr.get("closed_by") or {}
 
             participants = []
             for p in pr.get("participants") or []:
@@ -176,14 +184,6 @@ class PullRequestsStream(HttpSubStream, BitbucketCloudStream):
                     "approved": p.get("approved", False),
                     "state": p.get("state"),
                 })
-            requested_reviewers = [
-                {
-                    "display_name": r.get("display_name"),
-                    "uuid": r.get("uuid"),
-                    "nickname": r.get("nickname"),
-                }
-                for r in (pr.get("reviewers") or [])
-            ]
 
             record = {
                 "unique_key": _make_unique_key(
@@ -191,23 +191,19 @@ class PullRequestsStream(HttpSubStream, BitbucketCloudStream):
                 ),
                 "id": pr_id,
                 "title": pr.get("title"),
-                "description": pr.get("description"),
+                "description": _truncate(pr.get("description")),
                 "state": pr.get("state"),
                 "created_on": pr.get("created_on"),
                 "updated_on": updated_on,
                 "author_display_name": author.get("display_name"),
                 "author_uuid": author.get("uuid"),
-                "author_nickname": author.get("nickname"),
                 "source_branch": src_branch.get("name"),
                 "destination_branch": dst_branch.get("name"),
                 "merge_commit_hash": merge_commit.get("hash"),
-                "close_source_branch": pr.get("close_source_branch"),
-                "closed_by_display_name": closed_by.get("display_name"),
-                "closed_by_uuid": closed_by.get("uuid"),
+                # comment_count retained: read by pr_comments.stream_slices
+                # to skip zero-comment PRs without an API call.
                 "comment_count": pr.get("comment_count", 0),
-                "task_count": pr.get("task_count", 0),
                 "participants": participants,
-                "requested_reviewers": requested_reviewers,
                 "workspace": workspace,
                 "repo_slug": slug,
             }
@@ -241,7 +237,7 @@ class PullRequestsStream(HttpSubStream, BitbucketCloudStream):
         return {
             "$schema": "http://json-schema.org/draft-07/schema#",
             "type": "object",
-            "additionalProperties": True,
+            "additionalProperties": False,
             "properties": {
                 "tenant_id": {"type": "string"},
                 "source_id": {"type": "string"},
@@ -256,17 +252,11 @@ class PullRequestsStream(HttpSubStream, BitbucketCloudStream):
                 "updated_on": {"type": ["null", "string"]},
                 "author_display_name": {"type": ["null", "string"]},
                 "author_uuid": {"type": ["null", "string"]},
-                "author_nickname": {"type": ["null", "string"]},
                 "source_branch": {"type": ["null", "string"]},
                 "destination_branch": {"type": ["null", "string"]},
                 "merge_commit_hash": {"type": ["null", "string"]},
-                "close_source_branch": {"type": ["null", "boolean"]},
-                "closed_by_display_name": {"type": ["null", "string"]},
-                "closed_by_uuid": {"type": ["null", "string"]},
                 "comment_count": {"type": ["null", "integer"]},
-                "task_count": {"type": ["null", "integer"]},
                 "participants": {"type": ["null", "array"]},
-                "requested_reviewers": {"type": ["null", "array"]},
                 "workspace": {"type": "string"},
                 "repo_slug": {"type": "string"},
             },

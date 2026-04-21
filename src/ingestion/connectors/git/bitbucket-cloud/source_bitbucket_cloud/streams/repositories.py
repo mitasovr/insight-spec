@@ -27,7 +27,11 @@ class RepositoriesStream(BitbucketCloudStream):
     name = "repositories"
     cursor_field = "updated_on"
     use_cache = True
-    state_checkpoint_interval = 100
+    # Descending API sort (sort=-updated_on): mid-slice checkpointing would
+    # persist the NEWEST cursor after record #1 and a crash before slice
+    # completion would cause the next run to skip all remaining (older)
+    # records. State persists only at slice (workspace) boundaries.
+    state_checkpoint_interval = None
 
     def __init__(
         self,
@@ -132,8 +136,6 @@ class RepositoriesStream(BitbucketCloudStream):
                 "updated_on": updated_on,
                 "has_issues": repo.get("has_issues"),
                 "has_wiki": repo.get("has_wiki"),
-                "fork_policy": repo.get("fork_policy"),
-                "mainbranch": repo.get("mainbranch"),
                 "mainbranch_name": mainbranch,
                 "project_key": project.get("key"),
                 "project_name": project.get("name"),
@@ -167,7 +169,7 @@ class RepositoriesStream(BitbucketCloudStream):
         return {
             "$schema": "http://json-schema.org/draft-07/schema#",
             "type": "object",
-            "additionalProperties": True,
+            "additionalProperties": False,
             "properties": {
                 "tenant_id": {"type": "string"},
                 "source_id": {"type": "string"},
@@ -187,8 +189,6 @@ class RepositoriesStream(BitbucketCloudStream):
                 "updated_on": {"type": ["null", "string"]},
                 "has_issues": {"type": ["null", "boolean"]},
                 "has_wiki": {"type": ["null", "boolean"]},
-                "fork_policy": {"type": ["null", "string"]},
-                "mainbranch": {"type": ["null", "object"]},
                 "mainbranch_name": {"type": ["null", "string"]},
                 "project_key": {"type": ["null", "string"]},
                 "project_name": {"type": ["null", "string"]},
