@@ -295,6 +295,57 @@ cd src/ingestion
 | `./down.sh` | Stop all services (data preserved) |
 | `./cleanup.sh` | Delete cluster and all data |
 
+### Image configuration
+
+Service images are controlled via environment variables in `.env.<name>`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IMAGE_REGISTRY` | _(empty)_ | Registry prefix, e.g. `ghcr.io/cyberfabric` |
+| `IMAGE_TAG` | `local` | Default image tag for all services |
+| `API_GATEWAY_IMAGE_TAG` | `$IMAGE_TAG` | Override tag for api-gateway |
+| `ANALYTICS_API_IMAGE_TAG` | `$IMAGE_TAG` | Override tag for analytics-api |
+| `IDENTITY_IMAGE_TAG` | `$IMAGE_TAG` | Override tag for identity-resolution |
+| `TOOLBOX_IMAGE_TAG` | `$IMAGE_TAG` | Override tag for insight-toolbox |
+| `IMAGE_PULL_POLICY` | `IfNotPresent` | Kubernetes pull policy |
+| `BUILD_IMAGES` | `true` | Build images locally before deploy |
+| `BUILD_AND_PUSH` | `false` | Push built images to registry |
+| `IMAGE_PLATFORM` | _(empty)_ | Cross-build platform, e.g. `linux/amd64` |
+
+To deploy a specific version instead of `latest`:
+
+```bash
+# In .env.virtuozzo (or any remote env file)
+IMAGE_REGISTRY=ghcr.io/cyberfabric
+IMAGE_TAG=2026.04.21.14.30-abc1234    # default for all services
+BUILD_IMAGES=false
+```
+
+To pin individual services to different versions:
+
+```bash
+IMAGE_TAG=2026.04.21.14.30-abc1234
+ANALYTICS_API_IMAGE_TAG=2026.04.20.09.15-def5678   # override just analytics-api
+```
+
+The Argo workflow templates (`dbt-run`, `ingestion-pipeline`) also accept a
+`toolbox_image` parameter to override the toolbox image at submission time.
+
+### CI/CD
+
+GitHub Actions builds and pushes container images on every merge to `main`
+(see `.github/workflows/build-images.yml`). Images are tagged as
+`YYYY.MM.DD.HH.mm-<short-sha>` and `latest`.
+
+| Image | Trigger path |
+|-------|-------------|
+| `insight-api-gateway` | `src/backend/**` |
+| `insight-analytics-api` | `src/backend/**` |
+| `insight-identity-resolution` | `src/backend/**` |
+| `insight-toolbox` | `src/ingestion/**` |
+
+To trigger a build manually: Actions → "Build & Push Container Images" → Run workflow.
+
 ### Running without Kubernetes
 
 For fast iteration on individual components without K8s:

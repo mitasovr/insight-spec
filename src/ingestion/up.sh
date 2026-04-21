@@ -6,7 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-TOOLBOX_IMAGE="${TOOLBOX_IMAGE:-insight-toolbox:local}"
+TOOLBOX_IMAGE_TAG="${TOOLBOX_IMAGE_TAG:-${IMAGE_TAG:-local}}"
+TOOLBOX_IMAGE="${TOOLBOX_IMAGE:-${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}insight-toolbox:${TOOLBOX_IMAGE_TAG}}"
 
 if [[ -z "${KUBECONFIG:-}" ]]; then
   echo "ERROR: KUBECONFIG is not set. Run the root up.sh instead." >&2
