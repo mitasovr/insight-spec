@@ -33,8 +33,7 @@ metadata:
 type: Opaque
 stringData:
   admin_api_key: "<your-key>"
-  # start_date: "2026-01-01"           # optional, default = 90 days ago
-  # insight_source_id: "claude-admin-main"  # optional, default = ""
+  # start_date: "2026-01-01T00:00:00Z"  # optional, full ISO 8601 required; default = 90 days ago
 ```
 
 ### Fields
@@ -42,8 +41,9 @@ stringData:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `admin_api_key` | Yes | Anthropic Admin API key with organization-level read scope. Marked `airbyte_secret: true` — never logged. |
-| `start_date` | No | Earliest date to collect usage / cost / code-usage data from (ISO 8601 or YYYY-MM-DD). Default: 90 days ago. |
-| `insight_source_id` | No | Connector instance identifier; defaults to empty string. Use to discriminate multiple deployments. |
+| `start_date` | No | Earliest date to collect usage / cost / code-usage data from. Must be full ISO 8601 (`YYYY-MM-DDThh:mm:ssZ`, e.g. `2026-01-01T00:00:00Z`). Bare `YYYY-MM-DD` is rejected by the messages/cost streams' strict datetime parser. Default: 90 days ago. |
+
+> `insight_source_id` is **not** a `stringData` field — it is injected from the `insight.cyberfabric.com/source-id` annotation on the Secret (see Automatically injected below). Setting it in `stringData` has no effect.
 
 ### Automatically injected
 

@@ -198,7 +198,7 @@ This repo uses [Cypilot](https://github.com/cyberfabric/cyber-pilot) — an AI a
 | Wiki | Confluence, Outline | `class_wiki_pages`, `class_wiki_activity` |
 | Support | Zendesk, JSM | `class_support_activity` |
 | AI Dev Tools | Cursor, Windsurf, Copilot, JetBrains | `class_ai_dev_usage` |
-| AI Tools | Claude API/Team, OpenAI API, ChatGPT Team | `class_ai_api_usage`, `class_ai_tool_usage` |
+| AI Tools | Claude Admin, Claude Enterprise, OpenAI API, ChatGPT Team | `class_ai_api_usage`, `class_ai_tool_usage` |
 | HR / Directory | BambooHR, Workday, LDAP | `class_people`, `class_org_units` |
 | CRM | HubSpot, Salesforce | TBD |
 | Design Tools | Figma | `class_design_activity` |

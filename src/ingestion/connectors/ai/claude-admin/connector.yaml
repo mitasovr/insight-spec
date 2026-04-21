@@ -847,7 +847,7 @@ spec:
       start_date:
         type: string
         title: Start Date
-        description: "Earliest date to collect data from (ISO 8601, e.g. 2026-01-01T00:00:00Z). YYYY-MM-DD is also accepted. Defaults to 90 days ago."
+        description: "Earliest date to collect data from. Must be full ISO 8601 with time component (e.g. 2026-01-01T00:00:00Z) — the messages_usage and cost_report streams use strict datetime parsing and reject bare YYYY-MM-DD. Defaults to 90 days ago."
         order: 3
     additionalProperties: true
 

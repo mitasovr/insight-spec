@@ -229,7 +229,7 @@ Every connector **MUST** have a `README.md` documenting: (a) a complete K8s Secr
 - `cpt-insightspec-flow-k8s-secret-credentials-configure`
 
 **Touches**:
-- `src/ingestion/connectors/*/README.md` (7 connectors)
+- `src/ingestion/connectors/*/README.md` (6 connectors)
 
 ### Example Tenant Config Update
 
