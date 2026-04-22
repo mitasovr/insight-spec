@@ -200,7 +200,12 @@ def main():
         tenant_id, source_type, source_id, _ = key
         for obs in obs_list:
             alias_value = obs["alias_value"]
-            if len(alias_value.encode("utf-8")) > MAX_ALIAS_VALUE_LEN:
+            # VARCHAR(512) utf8mb4 caps at 512 *characters* (up to ~2048
+            # bytes), so we compare character length, not byte length;
+            # otherwise non-ASCII values (IDN emails, accented display
+            # names) would be dropped even though MariaDB would accept
+            # them.
+            if len(alias_value) > MAX_ALIAS_VALUE_LEN:
                 oversized += 1
                 continue
             insert_rows.append((
@@ -217,7 +222,7 @@ def main():
 
     print(f"  Rows to insert (pre-dedup): {len(insert_rows)}")
     if oversized:
-        print(f"  Rows skipped -- alias_value > {MAX_ALIAS_VALUE_LEN} bytes: {oversized}")
+        print(f"  Rows skipped -- alias_value > {MAX_ALIAS_VALUE_LEN} characters: {oversized}")
 
     # 5. Write to MariaDB via INSERT IGNORE.
     #    The uq_person_observation UNIQUE KEY guarantees identical
