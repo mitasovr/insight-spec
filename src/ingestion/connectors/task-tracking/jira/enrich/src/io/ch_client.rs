@@ -13,10 +13,10 @@ pub struct ChConfig {
 impl ChConfig {
     #[must_use]
     pub fn http_url(&self) -> String {
-        // The `clickhouse` crate drives the HTTP interface; port 8123 by default.
-        // When operators pass the native port (9000) we still use the HTTP endpoint
-        // derived from `host`; production deployments expose both on the same host.
-        format!("http://{}:8123", self.host)
+        // The `clickhouse` crate drives the HTTP interface. Operators pass the HTTP
+        // port explicitly; we honor it verbatim so non-default deployments (e.g. a
+        // proxy on 8443) work without a code change.
+        format!("http://{}:{}", self.host, self.port)
     }
 
     #[must_use]

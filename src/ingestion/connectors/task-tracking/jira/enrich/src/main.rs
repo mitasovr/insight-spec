@@ -16,7 +16,10 @@ struct Args {
     #[arg(long, env = "CLICKHOUSE_HOST")]
     clickhouse_host: String,
 
-    #[arg(long, env = "CLICKHOUSE_PORT", default_value_t = 9000)]
+    /// ClickHouse HTTP port (the `clickhouse` crate drives the HTTP interface).
+    /// Default 8123 matches the CH HTTP default; pass a different value only when
+    /// operators expose CH HTTP on a non-default port (e.g. 8443 behind a proxy).
+    #[arg(long, env = "CLICKHOUSE_PORT", default_value_t = 8123)]
     clickhouse_port: u16,
 
     #[arg(long, env = "CLICKHOUSE_USER", default_value = "default")]

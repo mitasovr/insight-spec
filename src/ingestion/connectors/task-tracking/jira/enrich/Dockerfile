@@ -1,9 +1,18 @@
 # syntax=docker/dockerfile:1.7
 
-# ---- Build stage ----
-FROM rust:1.92-alpine AS builder
+# Matches the Rust-backend Docker pattern in src/backend/services/* (bookworm
+# builder + bookworm-slim runtime). Previously Alpine (musl) → Debian (glibc),
+# which risked silent musl/glibc ABI mismatches at runtime.
 
-RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static
+# ---- Build stage ----
+FROM rust:1.92-bookworm AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        pkg-config \
+        libssl-dev \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
@@ -23,9 +32,14 @@ RUN touch src/main.rs src/core/mod.rs src/core/types.rs src/core/jira.rs
 RUN cargo build --release --features io
 
 # ---- Runtime stage ----
-FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -U -u 1000 appuser
 
 COPY --from=builder /build/target/release/jira-enrich /usr/local/bin/jira-enrich
 
-USER nonroot:nonroot
+USER 1000
 ENTRYPOINT ["/usr/local/bin/jira-enrich"]

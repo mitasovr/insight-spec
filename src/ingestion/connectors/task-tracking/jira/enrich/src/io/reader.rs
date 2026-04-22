@@ -199,12 +199,15 @@ pub async fn fetch_all_snapshots(
     let headers: Vec<IssueHeaderRow> = client
         .clone()
         .query(
+            // FINAL forces ReplacingMergeTree merges on read. Bronze `jira_issue` is
+            // append-only (Airbyte destinationSyncMode='append'); without FINAL the reader
+            // can see multiple unmerged rows per issue when syncs overlap with merges.
             "SELECT COALESCE(source_id, '')                 AS insight_source_id, \
                     COALESCE(toString(jira_id), '')         AS jira_id, \
                     COALESCE(toString(id_readable), '')     AS id_readable, \
                     COALESCE(toInt64(toUnixTimestamp64Milli(parseDateTime64BestEffortOrNull(created, 3))), 0) AS created_ms, \
                     reporter_id \
-             FROM bronze_jira.jira_issue AS ji \
+             FROM bronze_jira.jira_issue FINAL AS ji \
              WHERE source_id = ?",
         )
         .bind(insight_source_id)
@@ -305,7 +308,7 @@ pub fn open_events_cursor(
                     e.value_to              AS value_to, \
                     e.value_to_string       AS value_to_string \
              FROM staging.jira_changelog_items e \
-             LEFT JOIN bronze_jira.jira_issue i \
+             LEFT JOIN bronze_jira.jira_issue FINAL i \
                  ON e.insight_source_id = i.source_id \
                 AND e.id_readable        = i.id_readable \
              LEFT JOIN ( \
