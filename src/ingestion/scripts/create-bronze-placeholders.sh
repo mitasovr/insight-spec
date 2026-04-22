@@ -15,6 +15,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INGESTION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SECRETS_DIR="$INGESTION_DIR/secrets/connectors"
+CONNECTOR_SECRET_NAMESPACE="${CONNECTOR_SECRET_NAMESPACE:-airbyte}"
 
 CH_PASS="${CLICKHOUSE_PASSWORD:-$(kubectl get secret clickhouse-credentials -n data -o jsonpath='{.data.password}' | base64 -d)}"
 
@@ -30,8 +31,17 @@ ch_table_exists() {
   [[ "$result" == "1" ]]
 }
 
+# A connector is considered "configured" if EITHER a local secret file
+# exists (dev workflow: secrets/connectors/*.yaml fed through
+# ./secrets/apply.sh) OR the corresponding Kubernetes Secret already
+# exists in the connector namespace (CI/ExternalSecrets workflow). This
+# avoids creating placeholders on top of a real, k8s-provisioned
+# connector when secrets bypass the repo's local `secrets/` folder.
 secret_exists() {
-  [[ -f "$SECRETS_DIR/$1.yaml" ]]
+  local connector="$1"
+  [[ -f "$SECRETS_DIR/$connector.yaml" ]] && return 0
+  local secret_name="airbyte-$connector"
+  kubectl -n "$CONNECTOR_SECRET_NAMESPACE" get secret "$secret_name" &>/dev/null
 }
 
 echo "=== Bronze placeholders (for missing connectors) ==="
@@ -67,12 +77,17 @@ CREATE TABLE IF NOT EXISTS bronze_jira.jira_issue (
 SQL
 fi
 
-# bronze_m365 — needed by gold-views teams_person_daily, files_person_daily, comms_daily
+# bronze_m365 -- needed by gold-views teams_person_daily, files_person_daily, comms_daily.
+# Each table is checked and created independently so a partially-seeded
+# state (e.g. teams_activity exists, onedrive_activity doesn't) gets the
+# missing ones repaired on a re-run.
 if ! secret_exists m365; then
+  run_ch <<'SQL'
+CREATE DATABASE IF NOT EXISTS bronze_m365;
+SQL
   if ! ch_table_exists bronze_m365 teams_activity; then
     echo "  Creating placeholder: bronze_m365.teams_activity (no m365 secret)"
     run_ch <<'SQL'
-CREATE DATABASE IF NOT EXISTS bronze_m365;
 CREATE TABLE IF NOT EXISTS bronze_m365.teams_activity (
     userPrincipalName String,
     lastActivityDate String,
@@ -82,6 +97,11 @@ CREATE TABLE IF NOT EXISTS bronze_m365.teams_activity (
     callCount Nullable(Float64),
     _airbyte_extracted_at DateTime64(3, 'UTC') DEFAULT now64(3)
 ) ENGINE = MergeTree ORDER BY userPrincipalName;
+SQL
+  fi
+  if ! ch_table_exists bronze_m365 onedrive_activity; then
+    echo "  Creating placeholder: bronze_m365.onedrive_activity (no m365 secret)"
+    run_ch <<'SQL'
 CREATE TABLE IF NOT EXISTS bronze_m365.onedrive_activity (
     userPrincipalName String,
     lastActivityDate String,
@@ -89,6 +109,11 @@ CREATE TABLE IF NOT EXISTS bronze_m365.onedrive_activity (
     sharedExternallyFileCount Nullable(Float64),
     _airbyte_extracted_at DateTime64(3, 'UTC') DEFAULT now64(3)
 ) ENGINE = MergeTree ORDER BY userPrincipalName;
+SQL
+  fi
+  if ! ch_table_exists bronze_m365 sharepoint_activity; then
+    echo "  Creating placeholder: bronze_m365.sharepoint_activity (no m365 secret)"
+    run_ch <<'SQL'
 CREATE TABLE IF NOT EXISTS bronze_m365.sharepoint_activity (
     userPrincipalName String,
     lastActivityDate String,

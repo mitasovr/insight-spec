@@ -39,10 +39,15 @@ echo "=== MariaDB migrations (pod: $MARIADB_NAMESPACE/$MARIADB_POD) ==="
 
 # Execute a SQL statement inside the MariaDB pod.
 # Reads SQL from stdin, writes results to stdout, errors to stderr.
+# Password is passed via MYSQL_PWD instead of `-p...` so it does not
+# appear in the process list inside the pod and does not trigger the
+# "Using a password on the command line interface can be insecure"
+# warning on every invocation.
 mariadb_exec() {
   kubectl -n "$MARIADB_NAMESPACE" exec -i "$MARIADB_POD" \
     -c "$MARIADB_CONTAINER" -- \
-    mariadb -u "$MARIADB_USER" -p"$MARIADB_PASSWORD" -D "$MARIADB_DB" \
+    env MYSQL_PWD="$MARIADB_PASSWORD" \
+    mariadb -u "$MARIADB_USER" -D "$MARIADB_DB" \
     --batch --skip-column-names "$@"
 }
 

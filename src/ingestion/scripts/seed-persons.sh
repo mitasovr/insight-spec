@@ -32,19 +32,45 @@ export CLICKHOUSE_USER="${CLICKHOUSE_USER:-default}"
 export CLICKHOUSE_PASSWORD="$CH_PASS"
 
 # -- Resolve MariaDB credentials ------------------------------------------
+# All MARIADB_* values are resolved here and exported to the Python
+# subprocess. URL-encode user/password so passwords containing ':', '@',
+# '/', or '%' do not break URL parsing in the Python side.
 MARIADB_USER="${MARIADB_USER:-insight}"
 MARIADB_PASSWORD="${MARIADB_PASSWORD:-insight-pass}"
 MARIADB_HOST="${MARIADB_HOST:-localhost}"
 MARIADB_PORT="${MARIADB_PORT:-3306}"
 MARIADB_DB="${MARIADB_DB:-analytics}"
-export MARIADB_URL="mysql://${MARIADB_USER}:${MARIADB_PASSWORD}@${MARIADB_HOST}:${MARIADB_PORT}/${MARIADB_DB}"
+export MARIADB_USER MARIADB_PASSWORD MARIADB_HOST MARIADB_PORT MARIADB_DB
+
+_USER_ENC=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["MARIADB_USER"], safe=""))')
+_PASS_ENC=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["MARIADB_PASSWORD"], safe=""))')
+export MARIADB_URL="mysql://${_USER_ENC}:${_PASS_ENC}@${MARIADB_HOST}:${MARIADB_PORT}/${MARIADB_DB}"
 
 # -- Ensure MariaDB port-forward ------------------------------------------
-if ! nc -z localhost 3306 2>/dev/null; then
+# Use python3 for port-check instead of nc -- nc is missing on Windows
+# Git Bash. Only auto-port-forward against the default Kind pod name; if
+# MARIADB_HOST is explicitly overridden to something else (e.g. a remote
+# managed instance) trust the caller.
+_port_open() {
+  python3 -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(0.5)
+try:
+    s.connect(('${MARIADB_HOST}', ${MARIADB_PORT}))
+except OSError:
+    sys.exit(1)
+"
+}
+if [[ "$MARIADB_HOST" == "localhost" || "$MARIADB_HOST" == "127.0.0.1" ]] \
+    && ! _port_open; then
   echo "  Starting MariaDB port-forward..."
-  nohup kubectl -n insight port-forward svc/insight-mariadb 3306:3306 >/dev/null 2>&1 &
+  nohup kubectl -n insight port-forward svc/insight-mariadb "${MARIADB_PORT}:3306" >/dev/null 2>&1 &
   disown
-  sleep 3
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    _port_open && break
+    sleep 1
+  done
 fi
 
 # -- Run seed -------------------------------------------------------------

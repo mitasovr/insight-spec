@@ -12,10 +12,14 @@
 # version in `schema_migrations` on exit 0.
 set -euo pipefail
 
+# Pass the password via MYSQL_PWD rather than `-p...` so the process list
+# and pod logs don't leak it, and so MariaDB doesn't print its standard
+# "Using a password on the command line interface can be insecure"
+# warning on every invocation.
 kubectl -n "${MARIADB_NAMESPACE:?}" exec -i "${MARIADB_POD:?}" \
   -c "${MARIADB_CONTAINER:?}" -- \
-  mariadb -u "${MARIADB_USER:?}" -p"${MARIADB_PASSWORD:?}" -D "${MARIADB_DB:?}" \
-  --batch <<'SQL'
+  env MYSQL_PWD="${MARIADB_PASSWORD:?}" \
+  mariadb -u "${MARIADB_USER:?}" -D "${MARIADB_DB:?}" --batch <<'SQL'
 CREATE INDEX IF NOT EXISTS idx_schema_migrations_applied_at
     ON schema_migrations (applied_at);
 SQL

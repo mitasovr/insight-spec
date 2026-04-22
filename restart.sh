@@ -15,9 +15,30 @@ cd "$ROOT_DIR"
 ENV_NAME="local"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --env)   ENV_NAME="$2"; shift 2 ;;
-    --env=*) ENV_NAME="${1#*=}"; shift ;;
-    *)       shift ;;
+    --env)
+      if [[ -z "${2-}" ]]; then
+        echo "ERROR: --env requires a value (e.g. --env local)" >&2
+        exit 1
+      fi
+      ENV_NAME="$2"
+      shift 2
+      ;;
+    --env=*)
+      ENV_NAME="${1#*=}"
+      if [[ -z "$ENV_NAME" ]]; then
+        echo "ERROR: --env= requires a value (e.g. --env=local)" >&2
+        exit 1
+      fi
+      shift
+      ;;
+    -h|--help)
+      grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      exit 1
+      ;;
   esac
 done
 
@@ -87,8 +108,12 @@ if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=mariadb -n "$NAMESPACE" --timeout=120s 2>/dev/null \
       || echo "  WARNING: MariaDB not ready"
 
-    # Clean up stale replication-job pods (Airbyte sync pods that didn't finish cleanly)
-    kubectl delete pod -n airbyte --field-selector=status.phase!=Running --force 2>/dev/null || true
+    # Clean up stale replication-job pods (Airbyte sync pods that didn't finish cleanly).
+    # Scoped to terminal phases only -- phase!=Running would also match Pending
+    # and ContainerCreating, killing freshly rescheduled workloads.
+    for phase in Failed Succeeded; do
+      kubectl delete pod -n airbyte --field-selector="status.phase=$phase" --force 2>/dev/null || true
+    done
 
     # Ensure CoreDNS is patched (public DNS upstream — survives Kind restart normally,
     # but guard against manual edits / cluster-wide reset).

@@ -90,6 +90,15 @@ OIDC_AUDIENCE="${OIDC_AUDIENCE:-api://default}"
 
 DEPLOY_TS="$(date +%s)"
 
+# ─── MariaDB credentials (dev defaults; production must override via env) ─
+# Kept at the top so Analytics API (below) can derive ANALYTICS_DB_URL from
+# the same values, and so an operator-provided override flows through the
+# whole pipeline without editing multiple places.
+MARIADB_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD:-root-local}"
+MARIADB_DATABASE="${MARIADB_DATABASE:-analytics}"
+MARIADB_USER="${MARIADB_USER:-insight}"
+MARIADB_PASSWORD="${MARIADB_PASSWORD:-insight-pass}"
+
 # ─── Sanity ───────────────────────────────────────────────────────────────
 if [[ "$AUTH_DISABLED" != "true" && -z "$OIDC_EXISTING_SECRET" ]]; then
   : "${OIDC_ISSUER:?ERROR: OIDC_ISSUER is required — set it in $ENV_FILE or use OIDC_EXISTING_SECRET}"
@@ -198,11 +207,19 @@ fi
 
 # ─── App-level infra (MariaDB, Redis) ────────────────────────────────────
 if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "infra" ]]; then
-  # MariaDB — required by Analytics API for metric definitions
-  MARIADB_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD:-root-local}"
-  MARIADB_DATABASE="${MARIADB_DATABASE:-analytics}"
-  MARIADB_USER="${MARIADB_USER:-insight}"
-  MARIADB_PASSWORD="${MARIADB_PASSWORD:-insight-pass}"
+  # MariaDB -- required by Analytics API for metric definitions.
+  # Credentials are pre-loaded into a Kubernetes Secret and handed to the
+  # Bitnami chart via auth.existingSecret (avoids passing the password on
+  # a helm --set command line -- which would also place it in Codacy's
+  # "hardcoded password" detector bucket and in kubectl events).
+  MARIADB_SECRET_NAME="insight-mariadb-auth"
+  kubectl create secret generic "$MARIADB_SECRET_NAME" \
+    --namespace "$NAMESPACE" \
+    --from-literal=mariadb-root-password="$MARIADB_ROOT_PASSWORD" \
+    --from-literal=mariadb-password="$MARIADB_PASSWORD" \
+    --from-literal=mariadb-replication-password="$MARIADB_PASSWORD" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
   if ! helm status insight-mariadb -n "$NAMESPACE" &>/dev/null; then
     echo "=== Deploying MariaDB ==="
     helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
@@ -210,13 +227,23 @@ if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "infra" 
     helm upgrade --install insight-mariadb bitnami/mariadb \
       --namespace "$NAMESPACE" --version "~20" \
       -f helmfile/values/mariadb.yaml \
-      --set auth.rootPassword="$MARIADB_ROOT_PASSWORD" \
+      --set auth.existingSecret="$MARIADB_SECRET_NAME" \
       --set auth.database="$MARIADB_DATABASE" \
       --set auth.username="$MARIADB_USER" \
-      --set auth.password="$MARIADB_PASSWORD" \
       --wait --timeout 5m
   else
     echo "=== MariaDB already deployed ==="
+  fi
+
+  # Apply MariaDB schema migrations BEFORE backend services start.
+  # Analytics-api / identity-resolution read persons and future
+  # schema_migrations-owned tables on startup; bringing them up while
+  # migrations are still running violates ADR-0005's lifecycle ordering.
+  if [[ -x "$ROOT_DIR/src/ingestion/scripts/run-migrations-mariadb.sh" ]]; then
+    echo "=== Running MariaDB migrations ==="
+    MARIADB_USER="$MARIADB_USER" MARIADB_PASSWORD="$MARIADB_PASSWORD" \
+    MARIADB_DB="$MARIADB_DATABASE" MARIADB_NAMESPACE="$NAMESPACE" \
+      "$ROOT_DIR/src/ingestion/scripts/run-migrations-mariadb.sh"
   fi
 
   # Plain Deployment + Service. Cache only — no persistence, no auth.
@@ -333,7 +360,10 @@ if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "backend
   GATEWAY_IMG=$(image_ref api-gateway)
 
   # ── Service wiring (env-configurable) ───────────────────────────────
-  ANALYTICS_DB_URL="${ANALYTICS_DB_URL:-mysql://insight:insight-pass@insight-mariadb:3306/analytics}"
+  # Derive ANALYTICS_DB_URL from the MARIADB_* variables above so operator
+  # overrides (USER / PASSWORD / DATABASE) propagate to the Analytics API
+  # without needing a separate ANALYTICS_DB_URL override.
+  ANALYTICS_DB_URL="${ANALYTICS_DB_URL:-mysql://${MARIADB_USER}:${MARIADB_PASSWORD}@insight-mariadb:3306/${MARIADB_DATABASE}}"
   CLICKHOUSE_URL="${CLICKHOUSE_URL:-http://clickhouse.data.svc.cluster.local:8123}"
   CLICKHOUSE_DB="${CLICKHOUSE_DB:-insight}"
   CLICKHOUSE_CREDENTIALS_SECRET="${CLICKHOUSE_CREDENTIALS_SECRET:-}"

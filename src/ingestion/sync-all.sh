@@ -27,8 +27,18 @@ source "${TOOLKIT_DIR}/lib/state.sh"
 TENANT_FILTER=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --tenant) TENANT_FILTER="$2"; shift 2 ;;
-    *)        shift ;;
+    --tenant)
+      if [[ -z "${2-}" ]]; then
+        echo "ERROR: --tenant requires a value (e.g. --tenant test-local)" >&2
+        exit 1
+      fi
+      TENANT_FILTER="$2"
+      shift 2
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      exit 1
+      ;;
   esac
 done
 
@@ -61,16 +71,16 @@ for i in "${!CONNECTION_IDS[@]}"; do
   cid="${CONNECTION_IDS[$i]}"
   label="${CONNECTION_LABELS[$i]}"
   echo -n "  ${label} (${cid})... "
-  result=$(curl -sf -X POST "${AIRBYTE_API}/api/v1/connections/sync" \
-    -H "Authorization: Bearer ${AIRBYTE_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "{\"connectionId\":\"${cid}\"}" 2>&1) && {
+  if result=$(curl -sf -X POST "${AIRBYTE_API}/api/v1/connections/sync" \
+      -H "Authorization: Bearer ${AIRBYTE_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "{\"connectionId\":\"${cid}\"}" 2>&1); then
     job_id=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('job',{}).get('id','?'))" 2>/dev/null || echo "?")
     echo "started (job: ${job_id})"
-  } || {
+  else
     echo "FAILED"
     FAILED=$((FAILED + 1))
-  }
+  fi
 done
 
 echo ""
