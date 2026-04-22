@@ -13,13 +13,15 @@ spec:
         parameters:
           - name: dbt_select
             default: "tag:silver"
+          - name: toolbox_image
+            default: "ghcr.io/cyberfabric/insight-toolbox:latest"
           - name: clickhouse_host
             default: "clickhouse.data.svc.cluster.local"
           - name: clickhouse_port
             default: "8123"
       activeDeadlineSeconds: 1800
       script:
-        image: ghcr.io/cyberfabric/insight-toolbox:latest
+        image: "{{inputs.parameters.toolbox_image}}"
         imagePullPolicy: Always
         command: [bash]
         env:
