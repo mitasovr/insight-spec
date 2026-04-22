@@ -41,8 +41,9 @@ For every task metric the join is:
 LEFT JOIN silver.class_task_users FINAL u
        ON u.insight_source_id = t.insight_source_id
       AND u.user_id = t.<author_field>
--- downstream: person_key = lower(u.email)
--- fallback: user_id itself (keeps metric computable even for privacy-hidden users)
+-- person_key with explicit fallback so privacy-hidden users (no email
+-- exposed) still roll up consistently under their stable user_id:
+--   person_key = COALESCE(lower(nullIf(u.email, '')), t.<author_field>)
 ```
 
 Resolution to canonical `person_id` (across all connectors via `class_people`)
@@ -62,13 +63,17 @@ Jira Cloud stores status in two related concepts:
 
 FE dashboards want the canonical axis (`tasks_closed`, `task_dev_time`), so the
 pipeline **maps `status_id → category` via the lookup `silver.class_task_statuses`**
-(which carries `category_id` / `category_name` fields extracted from Jira's
-`/rest/api/3/status` endpoint).
+(which carries `category_id` / `category_key` / `category_name` fields extracted
+from Jira's `/rest/api/3/status` endpoint).
 
-> **Hardcoded mapping for v1**: the category values `new`, `indeterminate`, `done`
+Metric SQL below joins on `category_key` — the stable enum (`new` /
+`indeterminate` / `done`) — not `category_name`, which is the localized human
+label and varies per Jira language setting.
+
+> **Hardcoded mapping for v1**: the category keys `new`, `indeterminate`, `done`
 > come directly from the Jira API response. When a second task-tracker
 > connector is added (YouTrack), that connector must produce the same three
-> values in its `class_task_statuses` export.
+> values in its `class_task_statuses.category_key` export.
 
 ## Field inventory — what the existing silver exposes
 
@@ -279,9 +284,11 @@ WITH close_reopen_pairs AS (
     -- every done-transition for every issue
     SELECT fh.*, toDate(event_at) AS close_date
     FROM silver.class_task_field_history FINAL fh
-    JOIN silver.class_task_statuses FINAL s USING (status_id)
+    JOIN silver.class_task_statuses FINAL s
+      ON s.insight_source_id = fh.insight_source_id
+     AND s.status_id         = fh.delta_value_id
     WHERE field_id='status' AND delta_action='set'
-      AND s.category_name='Done' AND fh.event_kind='changelog'
+      AND s.category_key='done' AND fh.event_kind='changelog'
   ) t1
   LEFT JOIN silver.class_task_field_history FINAL t2
          ON t2.insight_source_id=t1.insight_source_id
@@ -290,8 +297,9 @@ WITH close_reopen_pairs AS (
         AND t2.event_at > t1.event_at
         AND t2.event_at <= t1.event_at + INTERVAL 14 DAY
   LEFT JOIN silver.class_task_statuses FINAL s2
-         ON s2.status_id = t2.delta_value_id
-  WHERE s2.category_name != 'Done' OR s2.category_name IS NULL
+         ON s2.insight_source_id = t2.insight_source_id
+        AND s2.status_id         = t2.delta_value_id
+  WHERE s2.category_key != 'done' OR s2.category_key IS NULL
   GROUP BY t1.insight_source_id, t1.issue_id, t1.event_at, t1.assignee_at_close
 )
 SELECT
@@ -434,6 +442,10 @@ GROUP BY person_key, metric_date
 
 ```sql
 WITH issue_sprint_events AS (
+  -- Each sprint add/remove event targets a single sprint id in `delta_value_id`.
+  -- No ARRAY JOIN on `value_ids` here — that array is the FULL post-change
+  -- sprint membership (multi-value snapshot), and exploding it would produce
+  -- N rows per event and mis-attribute scope_creep.
   SELECT
     fh.insight_source_id,
     fh.issue_id,
@@ -442,10 +454,11 @@ WITH issue_sprint_events AS (
     fh.delta_action            AS action,       -- 'add' | 'remove'
     sp.start_date, sp.complete_date
   FROM silver.class_task_field_history FINAL fh
-  ARRAY JOIN fh.value_ids AS sprint_id_in_array
   JOIN silver.class_task_sprints FINAL sp
-    ON sp.sprint_id = fh.delta_value_id        -- add/remove targets one sprint id
+    ON sp.insight_source_id = fh.insight_source_id
+   AND sp.sprint_id         = fh.delta_value_id
   WHERE fh.field_id = 'sprint'
+    AND fh.delta_action IN ('add', 'remove')
 ),
 sprint_commitments AS (
   SELECT insight_source_id, sprint_id,
