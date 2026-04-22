@@ -13,13 +13,14 @@
     {%- endfor -%}
 
     {%- if models | length == 0 -%}
-      {{ exceptions.raise_compiler_error("No models found with tag '" ~ tag_name ~ "' (all source tables missing)") }}
+      {{ log("union_by_tag: no models found with tag '" ~ tag_name ~ "' (all source tables missing) — emitting empty result", info=True) }}
+      SELECT 1 AS _placeholder WHERE FALSE
+    {%- else -%}
+      {%- for m in models %}
+        SELECT * FROM {{ ref(m.name) }}
+        {%- if not loop.last %} UNION ALL {% endif %}
+      {%- endfor -%}
     {%- endif -%}
-
-    {%- for m in models %}
-      SELECT * FROM {{ ref(m.name) }}
-      {%- if not loop.last %} UNION ALL {% endif %}
-    {%- endfor -%}
   {%- else -%}
     SELECT 1 AS _placeholder WHERE FALSE
   {%- endif -%}
