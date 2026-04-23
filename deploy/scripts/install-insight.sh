@@ -7,12 +7,13 @@
 # install-argo.sh, or alongside them.
 #
 # Environment overrides:
-#   INSIGHT_NAMESPACE  (default: insight)
-#   INSIGHT_RELEASE    (default: insight)
-#   INSIGHT_VERSION    (default: auto — read from Chart.yaml)
-#   INSIGHT_VALUES     extra -f values.yaml (for customization)
-#   CHART_SOURCE       local | oci   (default: local — path to charts/insight)
-#   OCI_REF            OCI reference for the chart (default: oci://ghcr.io/cyberfabric/charts/insight)
+#   INSIGHT_NAMESPACE    (default: insight)
+#   INSIGHT_RELEASE      (default: insight)
+#   INSIGHT_VERSION      (default: auto — read from Chart.yaml)
+#   INSIGHT_VALUES       single extra -f values.yaml (back-compat)
+#   INSIGHT_VALUES_FILES colon-separated list of -f values files, applied in order
+#   CHART_SOURCE         local | oci   (default: local — path to charts/insight)
+#   OCI_REF              OCI reference for the chart (default: oci://ghcr.io/cyberfabric/charts/insight)
 #
 # Usage:
 #   ./deploy/scripts/install-insight.sh
@@ -29,6 +30,7 @@ RELEASE="${INSIGHT_RELEASE:-insight}"
 CHART_SOURCE="${CHART_SOURCE:-local}"
 OCI_REF="${OCI_REF:-oci://ghcr.io/cyberfabric/charts/insight}"
 EXTRA_VALUES="${INSIGHT_VALUES:-}"
+EXTRA_VALUES_FILES="${INSIGHT_VALUES_FILES:-}"
 
 log() { printf '\033[36m[install-insight]\033[0m %s\n' "$*"; }
 die() { printf '\033[31m[install-insight] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -72,6 +74,14 @@ fi
 
 # ─── Install / upgrade ─────────────────────────────────────────────────
 VALUES_ARGS=()
+if [[ -n "$EXTRA_VALUES_FILES" ]]; then
+  # Colon-separated list — apply in order so later files override earlier.
+  IFS=':' read -ra _FILES <<< "$EXTRA_VALUES_FILES"
+  for _f in "${_FILES[@]}"; do
+    [[ -f "$_f" ]] || die "values file not found: $_f"
+    VALUES_ARGS+=(-f "$_f")
+  done
+fi
 [[ -n "$EXTRA_VALUES" ]] && VALUES_ARGS+=(-f "$EXTRA_VALUES")
 
 # HELM_EXTRA_ARGS: caller-supplied passthrough (e.g. --set flags). Split

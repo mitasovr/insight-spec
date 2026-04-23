@@ -41,7 +41,23 @@ Each infra component has exactly one values file:
 
 All four Applications reference these files via multi-source (`$values` pattern), so imperative (`deploy/scripts/install-*.sh`) and declarative (ArgoCD) deploys render **identical** manifests.
 
-## Quickstart: apply the Applications
+## Canonical path: App-of-Apps
+
+Use `root-app.yaml` to get the sync-wave ordering between infra and the
+umbrella:
+
+```bash
+kubectl apply -f deploy/gitops/root-app.yaml
+```
+
+`root-app.yaml` makes Airbyte/Argo/Argo-RBAC/Insight **child Applications** of a parent Application. **Only then do ArgoCD sync-wave annotations enforce ordering across them**: Insight (wave 1) waits for Airbyte + Argo + RBAC (wave 0) to become Healthy.
+
+Benefit: the customer applies ONE manifest and everything else is reconciled from Git.
+
+## Alternative: apply the four Applications directly (without ordering)
+
+If you cannot use App-of-Apps, you can apply the four Applications
+independently:
 
 ```bash
 kubectl apply -f deploy/gitops/airbyte-application.yaml
@@ -50,17 +66,12 @@ kubectl apply -f deploy/gitops/argo-rbac-application.yaml
 kubectl apply -f deploy/gitops/insight-application.yaml
 ```
 
-ArgoCD brings up Airbyte + Argo + Argo RBAC (wave 0), waits for them to become Healthy, then deploys Insight (wave 1) — all into namespace `insight`.
+**Caveat:** when Applications are managed directly by the root ArgoCD (not nested under a parent Application), sync-wave annotations **do not order them**. Insight may start syncing before Argo Workflows is Healthy and fail with `no matches for kind "WorkflowTemplate"`. Mitigations:
+- Apply infra first, wait for `argocd app get argo-workflows` to report Healthy, then apply `insight-application.yaml`.
+- Or set `helm.skipTests: true` + `syncPolicy.syncOptions.SkipDryRunOnMissingResource=true` and rely on ArgoCD's automatic retries.
+- Or flip `ingestion.templates.enabled: false` on the Insight Application until Argo CRDs are present, then enable.
 
-## App-of-Apps pattern
-
-A single `root-app.yaml` points at the `deploy/gitops/` directory — ArgoCD then discovers all other Application manifests in it and creates them too.
-
-```bash
-kubectl apply -f deploy/gitops/root-app.yaml
-```
-
-Benefit: the customer applies ONE manifest and everything else is reconciled from Git.
+The App-of-Apps path avoids all of this.
 
 ## Different target namespace
 

@@ -225,14 +225,16 @@ build_and_load_image() {
   fi
 }
 
-if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "backend" ]]; then
+# App services are MANDATORY components of the umbrella (no enabled-flag),
+# so whenever we install the umbrella — including `frontend` or `backend`
+# component runs that trigger helm upgrade — every image must be present
+# in the cluster. Otherwise backend pods land in ImagePullBackOff.
+if [[ "$COMPONENT" != "ingestion" ]]; then
   echo "=== Building backend images ==="
   build_and_load_image analytics-api src/backend/services/analytics-api/Dockerfile
   build_and_load_image identity      src/backend/services/identity/Dockerfile
   build_and_load_image api-gateway   src/backend/services/api-gateway/Dockerfile
-fi
 
-if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "frontend" ]]; then
   # Frontend — always pull; it is built in the insight-front repo.
   FE_REPO="${FE_IMAGE_REPOSITORY:-ghcr.io/cyberfabric/insight-front}"
   FE_TAG="${FE_IMAGE_TAG:-latest}"
@@ -243,9 +245,11 @@ if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "fronten
 fi
 
 # ─── Generate dev overrides for umbrella ──────────────────────────────────
-# The canonical installer reads the umbrella values.yaml plus our override
-# file. Here we generate that override from the env vars loaded in
-# dev-up.sh (.env.<env>).
+# The canonical installer reads the umbrella values.yaml plus overrides.
+# We produce a single tempfile with env-derived values; the standing
+# `deploy/values-dev.yaml` overlay (eval-grade credentials that the
+# canonical chart leaves empty) is passed as the first -f via
+# INSIGHT_VALUES_FILES, so helm merges them in order.
 DEV_VALUES=$(mktemp)
 trap 'rm -f "$DEV_VALUES"' EXIT
 
@@ -283,7 +287,6 @@ analyticsApi:
     tag: "${AN_TAG_VAL}"
     pullPolicy: "${IMAGE_PULL_POLICY}"
 identity:
-  enabled: false
   image:
     repository: "${ID_REPO}"
     tag: "${ID_TAG_VAL}"
@@ -316,16 +319,20 @@ if ! kubectl get crd workflowtemplates.argoproj.io >/dev/null 2>&1; then
   ARGO_CRD_GUARD="--set ingestion.templates.enabled=false"
 fi
 
+# Ordered list of values files passed to the umbrella. dev overlay first
+# (base eval credentials), env-derived override file second (wins).
+INSIGHT_VALUES_FILES="$ROOT_DIR/deploy/values-dev.yaml:$DEV_VALUES"
+
 # ─── Delegate to canonical installers ─────────────────────────────────────
 case "$COMPONENT" in
   all)
     INSIGHT_NAMESPACE="$NAMESPACE" \
-      INSIGHT_VALUES="$DEV_VALUES" \
+      INSIGHT_VALUES_FILES="$INSIGHT_VALUES_FILES" \
       "$ROOT_DIR/deploy/scripts/install.sh"
     ;;
   ingestion)
-    "$ROOT_DIR/deploy/scripts/install-airbyte.sh"
-    "$ROOT_DIR/deploy/scripts/install-argo.sh"
+    INSIGHT_NAMESPACE="$NAMESPACE" "$ROOT_DIR/deploy/scripts/install-airbyte.sh"
+    INSIGHT_NAMESPACE="$NAMESPACE" "$ROOT_DIR/deploy/scripts/install-argo.sh"
     ;;
   app|backend|frontend)
     # The umbrella deploys EVERYTHING: infra + backend + frontend. For
@@ -334,7 +341,7 @@ case "$COMPONENT" in
     # components of the umbrella (no per-service enable flag).
     SKIP_AIRBYTE=1 SKIP_ARGO=1 \
       INSIGHT_NAMESPACE="$NAMESPACE" \
-      INSIGHT_VALUES="$DEV_VALUES" \
+      INSIGHT_VALUES_FILES="$INSIGHT_VALUES_FILES" \
       HELM_EXTRA_ARGS="$ARGO_CRD_GUARD" \
       "$ROOT_DIR/deploy/scripts/install.sh"
     ;;

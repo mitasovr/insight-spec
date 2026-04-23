@@ -62,8 +62,19 @@ integration where infra is shared across products.
 {{- end -}}
 {{- end -}}
 
+{{- /*
+     fqdn = dial-able host. For the internal subchart we build a full
+     cluster-DNS name; for external mode we return the user-provided host
+     verbatim. Don't blindly append `.<ns>.svc.cluster.local` in external
+     mode — that would mangle e.g. `clickhouse.example.com` into
+     `clickhouse.example.com.insight.svc.cluster.local`.
+*/ -}}
 {{- define "insight.clickhouse.fqdn" -}}
+{{- if .Values.clickhouse.enabled -}}
 {{ include "insight.clickhouse.host" . }}.{{ .Release.Namespace }}.svc.cluster.local
+{{- else -}}
+{{ include "insight.clickhouse.host" . }}
+{{- end -}}
 {{- end -}}
 
 {{- define "insight.clickhouse.url" -}}
@@ -190,18 +201,75 @@ Invoked from NOTES.txt so they fire on every install.
     {{- end -}}
   {{- end -}}
 
-  {{- /* External-mode prompts. The helpers would also fail here, but these
-         explicit checks produce a consistent message. */ -}}
-  {{- if and (not .Values.clickhouse.enabled) (not .Values.clickhouse.external.host) -}}
-    {{- fail "clickhouse.enabled=false requires clickhouse.external.host" -}}
+  {{- /* External-mode contracts. Each dep (CH/MariaDB/Redis/Redpanda) must
+         provide host, port, and credential source — typos in any of these
+         would otherwise only surface at runtime. */ -}}
+
+  {{- /* ClickHouse */ -}}
+  {{- if not .Values.clickhouse.enabled -}}
+    {{- if not .Values.clickhouse.external.host -}}
+      {{- fail "clickhouse.enabled=false requires clickhouse.external.host" -}}
+    {{- end -}}
+    {{- if not .Values.clickhouse.external.port -}}
+      {{- fail "clickhouse.enabled=false requires clickhouse.external.port" -}}
+    {{- end -}}
+    {{- if not .Values.clickhouse.external.credentialsSecret.name -}}
+      {{- fail "clickhouse.enabled=false requires clickhouse.external.credentialsSecret.name" -}}
+    {{- end -}}
   {{- end -}}
-  {{- if and (not .Values.mariadb.enabled) (not .Values.mariadb.external.host) -}}
-    {{- fail "mariadb.enabled=false requires mariadb.external.host" -}}
+
+  {{- /* MariaDB */ -}}
+  {{- if not .Values.mariadb.enabled -}}
+    {{- if not .Values.mariadb.external.host -}}
+      {{- fail "mariadb.enabled=false requires mariadb.external.host" -}}
+    {{- end -}}
+    {{- if not .Values.mariadb.external.port -}}
+      {{- fail "mariadb.enabled=false requires mariadb.external.port" -}}
+    {{- end -}}
+    {{- if not .Values.mariadb.external.database -}}
+      {{- fail "mariadb.enabled=false requires mariadb.external.database" -}}
+    {{- end -}}
+    {{- if not .Values.mariadb.external.credentialsSecret.name -}}
+      {{- fail "mariadb.enabled=false requires mariadb.external.credentialsSecret.name" -}}
+    {{- end -}}
   {{- end -}}
-  {{- if and (not .Values.redis.enabled) (not .Values.redis.external.host) -}}
-    {{- fail "redis.enabled=false requires redis.external.host" -}}
+
+  {{- /* Redis — passwordSecret required only if auth is on for the external instance */ -}}
+  {{- if not .Values.redis.enabled -}}
+    {{- if not .Values.redis.external.host -}}
+      {{- fail "redis.enabled=false requires redis.external.host" -}}
+    {{- end -}}
+    {{- if not .Values.redis.external.port -}}
+      {{- fail "redis.enabled=false requires redis.external.port" -}}
+    {{- end -}}
   {{- end -}}
-  {{- if and (not .Values.redpanda.enabled) (not .Values.redpanda.external.brokers) -}}
-    {{- fail "redpanda.enabled=false requires redpanda.external.brokers" -}}
+
+  {{- /* Redpanda — SASL credentials required only if external instance uses SASL */ -}}
+  {{- if not .Values.redpanda.enabled -}}
+    {{- if not .Values.redpanda.external.brokers -}}
+      {{- fail "redpanda.enabled=false requires redpanda.external.brokers" -}}
+    {{- end -}}
+    {{- if .Values.redpanda.external.sasl.enabled -}}
+      {{- if not .Values.redpanda.external.sasl.credentialsSecret.name -}}
+        {{- fail "redpanda.external.sasl.enabled=true requires redpanda.external.sasl.credentialsSecret.name" -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+
+  {{- /* Bundled-infra credentials — when the subchart is installed by the
+         umbrella, it needs a password. Empty defaults in canonical values
+         (see #4 in the review) prevent accidental `changeme` in prod. */ -}}
+  {{- if .Values.clickhouse.enabled -}}
+    {{- if not .Values.clickhouse.auth.password -}}
+      {{- fail "clickhouse.enabled=true requires clickhouse.auth.password (use -f deploy/values-dev.yaml for eval defaults)" -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if .Values.mariadb.enabled -}}
+    {{- if not .Values.mariadb.auth.password -}}
+      {{- fail "mariadb.enabled=true requires mariadb.auth.password (use -f deploy/values-dev.yaml for eval defaults)" -}}
+    {{- end -}}
+    {{- if not .Values.mariadb.auth.rootPassword -}}
+      {{- fail "mariadb.enabled=true requires mariadb.auth.rootPassword" -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}

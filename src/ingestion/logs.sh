@@ -120,7 +120,9 @@ for a in j.get('attempts',[]):
 
   # Also try to get logs from replication pods if still alive
   echo "--- Replication pods (if available) ---" >&2
-  repl_pods=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | grep "replication-job-${job_id}" | awk '{print $1}')
+  # awk-filter instead of grep|awk so an empty result is a clean exit 0
+  # (grep exits 1 on no match and `set -euo pipefail` would abort the script).
+  repl_pods=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | awk -v p="replication-job-${job_id}" '$1 ~ p {print $1}')
   for pod in $repl_pods; do
     for container in orchestrator source destination; do
       echo "--- $pod/$container ---" >&2
@@ -169,7 +171,7 @@ if [[ -z "$FOLLOW" ]]; then
 
   # Airbyte replication pods
   if [[ "${step}" != "dbt" && "${step}" != "run" ]]; then
-    repl_pods=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | grep "replication-job" | awk '{print $1}')
+    repl_pods=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | awk '$1 ~ /^replication-job/ {print $1}')
     for pod in $repl_pods; do
       echo "--- airbyte/$pod (orchestrator) ---" >&2
       kubectl logs "$pod" -n "$NS" -c orchestrator 2>/dev/null | grep -E "ERROR|WARN|Exception|Caused by|fail|replication" | tail -20 || true
@@ -181,7 +183,7 @@ if [[ -z "$FOLLOW" ]]; then
 
     # Airbyte job logs via API (survives pod deletion)
     # Extract job ID from poll-job logs
-    poll_pod=$(echo "$pods" | grep "poll-job" | head -1)
+    poll_pod=$(echo "$pods" | awk '/poll-job/ {print; exit}')
     if [[ -n "$poll_pod" ]]; then
       job_id=$(kubectl logs "$poll_pod" -n "$NS" -c main 2>/dev/null | grep -oE "Job [0-9]+" | head -1 | grep -oE "[0-9]+")
       if [[ -n "$job_id" ]]; then

@@ -44,4 +44,9 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
+      # Same-wave as argo-application; if the RBAC Application reconciles
+      # first and the `insight` namespace does not exist yet, ArgoCD would
+      # fail trying to create Role/RoleBinding. Ensure the namespace is
+      # created independently.
+      - CreateNamespace=true
       - ServerSideApply=true
