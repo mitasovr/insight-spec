@@ -14,11 +14,11 @@ spec:
           - name: dbt_select
             default: "tag:silver"
           - name: airbyte_url
-            default: "http://airbyte-airbyte-server-svc.airbyte.svc.cluster.local:8001"
+            default: "__AIRBYTE_URL__"
           - name: clickhouse_host
-            default: "insight-clickhouse.insight.svc.cluster.local"
+            default: "__CLICKHOUSE_FQDN__"
           - name: clickhouse_port
-            default: "8123"
+            default: "__CLICKHOUSE_PORT__"
       dag:
         tasks:
           - name: sync

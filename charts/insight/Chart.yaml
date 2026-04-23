@@ -82,27 +82,28 @@ dependencies:
   # ─── Application services ──────────────────────────────────────────────
   # All aliases are camelCase so values.yaml stays clean.
   # Service names inside the cluster stay kebab-case: `insight-api-gateway`.
+  #
+  # No `condition:` on app services: the umbrella is a single deployable
+  # unit and every app service is mandatory (Constructor Platform /
+  # SRE requirement). The gateway is the only entrance; the rest of the
+  # services are reachable only through it.
 
   - name: insight-api-gateway
     alias: apiGateway
     version: "0.1.0"
     repository: "file://../../src/backend/services/api-gateway/helm"
-    condition: apiGateway.enabled
 
   - name: insight-analytics-api
     alias: analyticsApi
     version: "0.1.0"
     repository: "file://../../src/backend/services/analytics-api/helm"
-    condition: analyticsApi.enabled
 
   - name: insight-identity-resolution
     alias: identity
     version: "0.1.0"
     repository: "file://../../src/backend/services/identity/helm"
-    condition: identity.enabled
 
   - name: insight-frontend
     alias: frontend
     version: "0.1.0"
     repository: "file://../../src/frontend/helm"
-    condition: frontend.enabled

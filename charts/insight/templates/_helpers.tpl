@@ -10,6 +10,10 @@ Central place for:
 Any template that needs a dependency host/port/URL uses a helper rather
 than hardcoding the name. If SRE ever decides to rename a component,
 only this file changes.
+
+No helper emits a silent default — missing values fail the render with
+a readable message. Defaults in helpers hide typos and lead to mysterious
+runtime failures.
 ==============================================================================
 */}}
 
@@ -31,9 +35,13 @@ app.kubernetes.io/part-of: insight
  SERVICE RESOLUTION HELPERS
 ==============================================================================
 Contract: each helper returns either the internal DNS (if the subchart is
-enabled) or the value from external.* (if enabled=false). Fails if external
-is missing while the subchart is disabled — this catches misconfiguration
-at helm template / install time, before anything hits the cluster.
+enabled) or the value from external.* (if enabled=false). Every field is
+required — no silent defaults. Missing values fail at helm template time.
+
+`enabled: true` means "Insight provides and manages this component".
+`enabled: false` means "the Constructor Platform (or another operator)
+provides it externally; Insight only consumes it". Required for platform
+integration where infra is shared across products.
 ==============================================================================
 */}}
 
@@ -52,6 +60,10 @@ at helm template / install time, before anything hits the cluster.
 {{- else -}}
 {{- required "clickhouse.enabled=false requires clickhouse.external.port" .Values.clickhouse.external.port -}}
 {{- end -}}
+{{- end -}}
+
+{{- define "insight.clickhouse.fqdn" -}}
+{{ include "insight.clickhouse.host" . }}.{{ .Release.Namespace }}.svc.cluster.local
 {{- end -}}
 
 {{- define "insight.clickhouse.url" -}}
@@ -117,7 +129,18 @@ redis://{{ include "insight.redis.host" . }}:{{ include "insight.redis.port" . }
 {{- end -}}
 {{- end -}}
 
-{{/* ---------- App service DNS (always internal, always umbrella-managed) ---------- */}}
+{{/*
+==============================================================================
+ APP SERVICE HOSTS
+==============================================================================
+App services are MANDATORY components of Insight — the gateway is the only
+entrance to the cluster internals, the rest of the services sit behind it.
+No enabled-flag here: the umbrella always deploys all four.
+
+These helpers stay for DRY so ingestion templates and any future sidecar
+can reference the services via the same helper pattern.
+==============================================================================
+*/}}
 {{- define "insight.apiGateway.host"   -}}{{- printf "%s-api-gateway"          .Release.Name -}}{{- end -}}
 {{- define "insight.analyticsApi.host" -}}{{- printf "%s-analytics-api"        .Release.Name -}}{{- end -}}
 {{- define "insight.identity.host"     -}}{{- printf "%s-identity-resolution" .Release.Name -}}{{- end -}}
@@ -132,24 +155,31 @@ Invoked from NOTES.txt so they fire on every install.
 ==============================================================================
 */}}
 {{- define "insight.validate" -}}
-  {{- /* OIDC is required when the gateway is on and auth is not disabled */ -}}
-  {{- if and .Values.apiGateway.enabled (not .Values.apiGateway.authDisabled) -}}
-    {{- if and (not .Values.apiGateway.oidc.existingSecret) (not .Values.apiGateway.oidc.issuer) -}}
-      {{- fail "apiGateway.oidc: either existingSecret OR inline issuer+clientId+redirectUri must be set when authDisabled=false" -}}
+  {{- /* OIDC is required when auth is not disabled. Either supply a pre-created
+         Secret, or set ALL three inline fields (issuer, clientId, redirectUri).
+         Checking only one of them lets typos slip through and fails at runtime. */ -}}
+  {{- if not .Values.apiGateway.authDisabled -}}
+    {{- if not .Values.apiGateway.oidc.existingSecret -}}
+      {{- if or (not .Values.apiGateway.oidc.issuer)
+                (not .Values.apiGateway.oidc.clientId)
+                (not .Values.apiGateway.oidc.redirectUri) -}}
+        {{- fail "apiGateway.oidc: when existingSecret is empty and authDisabled=false, issuer AND clientId AND redirectUri are ALL required" -}}
+      {{- end -}}
     {{- end -}}
   {{- end -}}
 
-  {{- /* External service references also validated via helpers, but making the intent explicit here */ -}}
+  {{- /* External-mode prompts. The helpers would also fail here, but these
+         explicit checks produce a consistent message. */ -}}
   {{- if and (not .Values.clickhouse.enabled) (not .Values.clickhouse.external.host) -}}
     {{- fail "clickhouse.enabled=false requires clickhouse.external.host" -}}
   {{- end -}}
-  {{- if and (not .Values.mariadb.enabled)    (not .Values.mariadb.external.host)    -}}
+  {{- if and (not .Values.mariadb.enabled) (not .Values.mariadb.external.host) -}}
     {{- fail "mariadb.enabled=false requires mariadb.external.host" -}}
   {{- end -}}
-  {{- if and (not .Values.redis.enabled)      (not .Values.redis.external.host)      -}}
+  {{- if and (not .Values.redis.enabled) (not .Values.redis.external.host) -}}
     {{- fail "redis.enabled=false requires redis.external.host" -}}
   {{- end -}}
-  {{- if and (not .Values.redpanda.enabled)   (not .Values.redpanda.external.brokers) -}}
+  {{- if and (not .Values.redpanda.enabled) (not .Values.redpanda.external.brokers) -}}
     {{- fail "redpanda.enabled=false requires redpanda.external.brokers" -}}
   {{- end -}}
 {{- end -}}

@@ -20,14 +20,23 @@
 ##    namespace. Airbyte and Argo Workflows are separate releases with
 ##    their own namespaces (see deploy/).
 ##
-## 3. Each infra dependency has an `enabled: true/false` switch:
+## 3. Each INFRA dependency (ClickHouse, MariaDB, Redis, Redpanda) has an
+##    `enabled: true/false` switch to support Constructor Platform
+##    integration, where infra may be managed centrally and shared across
+##    products:
 ##      - enabled: true  → bundled subchart is installed
 ##      - enabled: false → external service is used; the `external:` block
 ##                         must be filled (host/port/secrets)
 ##    The validator in templates/_helpers.tpl fails fast with a clear
-##    error message when `enabled: false` is used without `external.host`.
+##    error when `enabled: false` is used without `external.host`.
 ##
-## 4. Resolved infra coordinates (URLs, hosts) live in a single ConfigMap
+## 4. APP services (apiGateway, analyticsApi, identity, frontend) are
+##    MANDATORY components of the umbrella — no enabled-flag. The gateway
+##    is the only entrance to the cluster internals; the remaining services
+##    are reachable only through it. This matches the Constructor Platform
+##    integration contract.
+##
+## 5. Resolved infra coordinates (URLs, hosts) live in a single ConfigMap
 ##    named `{release}-platform` (see templates/platform-config.yaml).
 ##    Any pod in the namespace can read them via `envFrom`.
 ##
@@ -58,6 +67,11 @@ airbyte:
 # ═══════════════════════════════════════════════════════════════════════════
 #  INGESTION — WorkflowTemplates (content for Argo)
 # ═══════════════════════════════════════════════════════════════════════════
+#
+# The WorkflowTemplates require the Argo Workflows CRDs to be present in
+# the cluster. If Argo is not installed, set enabled=false or the umbrella
+# will fail with `no matches for kind "WorkflowTemplate"`.
+#
 ingestion:
   templates:
     enabled: true
@@ -89,10 +103,10 @@ clickhouse:
     requests: { cpu: 250m, memory: 512Mi }
     limits:   { cpu: "2",  memory: 4Gi   }
 
-  # BYO mode: fill these in and set enabled=false
+  # External mode: fill these in and set enabled=false
   external:
     host: ""                     # e.g. clickhouse.internal.acme.com
-    port: 8123
+    port: ""                     # e.g. 8123 — no default, must be explicit
     credentialsSecret:
       name: ""                   # Secret in the insight ns with username/password keys
       userKey: "username"
@@ -123,8 +137,8 @@ mariadb:
 
   external:
     host: ""                     # e.g. mysql.internal.acme.com
-    port: 3306
-    database: "insight"
+    port: ""                     # e.g. 3306
+    database: ""                 # e.g. insight
     credentialsSecret:
       name: ""                   # Secret with username/password keys
       userKey: "username"
@@ -149,7 +163,7 @@ redis:
 
   external:
     host: ""                     # e.g. redis.internal.acme.com
-    port: 6379
+    port: ""                     # e.g. 6379
     passwordSecret:
       name: ""
       key: "password"
@@ -181,7 +195,7 @@ redpanda:
     enabled: true
 
   external:
-    brokers: ""                  # "broker1:9092,broker2:9092"
+    brokers: ""                  # "broker1:9092,broker2:9092" — no default
     tls:
       enabled: false
     sasl:
@@ -193,7 +207,7 @@ redpanda:
         passwordKey: "password"
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  APPLICATION SERVICES
+#  APPLICATION SERVICES (mandatory — no enabled-flag)
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # NOTE: values like `<svc>.database.url`, `<svc>.clickhouse.url`,
@@ -208,7 +222,6 @@ redpanda:
 
 # ─── API Gateway ─────────────────────────────────────────────────────────
 apiGateway:
-  enabled: true
   replicaCount: 2
   image:
     repository: ghcr.io/cyberfabric/insight-api-gateway
@@ -226,9 +239,9 @@ apiGateway:
       enabled: false
       secretName: ""
 
-  # OIDC (required in prod — either existingSecret, or inline
-  # issuer+clientId+redirectUri). The umbrella validator fails when
-  # authDisabled=false and oidc is empty.
+  # OIDC (required in prod — either existingSecret, or ALL three inline
+  # fields: issuer + clientId + redirectUri). The umbrella validator
+  # fails when authDisabled=false and OIDC is partially configured.
   oidc:
     existingSecret: ""
     issuer: ""
@@ -256,7 +269,6 @@ apiGateway:
 
 # ─── Analytics API ───────────────────────────────────────────────────────
 analyticsApi:
-  enabled: true
   replicaCount: 2
   image:
     repository: ghcr.io/cyberfabric/insight-analytics-api
@@ -280,14 +292,13 @@ analyticsApi:
     password: "changeme"
 
   identityResolution:
-    url: ""                     # "" = identity service not used
+    url: "http://insight-identity-resolution:8082"
 
   redis:
     url: "redis://insight-redis-master:6379"
 
 # ─── Identity Resolution ─────────────────────────────────────────────────
 identity:
-  enabled: false                # MVP stub, off by default
   replicaCount: 1
   image:
     repository: ghcr.io/cyberfabric/insight-identity-resolution
@@ -308,7 +319,6 @@ identity:
 
 # ─── Frontend (SPA) ──────────────────────────────────────────────────────
 frontend:
-  enabled: true
   replicaCount: 1
   image:
     repository: ghcr.io/cyberfabric/insight-front

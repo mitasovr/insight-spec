@@ -7,6 +7,11 @@
 ## Version pin: `targetRevision` is the SINGLE upgrade knob for Insight.
 ## Bumping the product version = a PR that changes one line here.
 ##
+## Values come from a git-hosted overlay (deploy/gitops/insight-values.yaml)
+## so chart and configuration stay in sync: no inlined values to drift.
+## The overlay intentionally contains ONLY the fields that differ from the
+## chart's built-in defaults (OIDC secret reference, ingress hosts, TLS).
+##
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -20,96 +25,21 @@ metadata:
 spec:
   project: default
 
-  source:
-    # Chart is published to an OCI registry (see the release pipeline).
-    # For dev / self-hosted: replace with a Git repo + `path: charts/insight`.
-    repoURL: ghcr.io/cyberfabric/charts
-    chart: insight
-    targetRevision: 0.1.0
+  sources:
+    # 1. The umbrella chart (published to OCI). For dev / self-hosted,
+    #    replace with a Git repo + `path: charts/insight`.
+    - repoURL: ghcr.io/cyberfabric/charts
+      chart: insight
+      targetRevision: 0.1.0
+      helm:
+        releaseName: insight
+        valueFiles:
+          - $values/deploy/gitops/insight-values.yaml
 
-    helm:
-      releaseName: insight
-
-      # Values are inlined. For larger customers, maintain these in their
-      # own config repo and wire them up with multi-source (see README).
-      values: |
-        # ────────────────────────────────────────────────────────
-        # Integration with Airbyte installed as a separate Application
-        # ────────────────────────────────────────────────────────
-        airbyte:
-          apiUrl: "http://airbyte-airbyte-server-svc.airbyte.svc.cluster.local:8001"
-          # The JWT signature secret must be mirrored into the insight namespace.
-          # Implement via:
-          #   - Reflector (https://github.com/emberstack/kubernetes-reflector), or
-          #   - External Secrets Operator with source = Airbyte namespace, or
-          #   - Manual kubectl post-install step
-          jwtSecret:
-            name: airbyte-auth-secrets
-            key: jwt-signature-secret
-
-        # ────────────────────────────────────────────────────────
-        # Infrastructure
-        # ────────────────────────────────────────────────────────
-        clickhouse:
-          enabled: true
-          persistence:
-            size: 20Gi
-          resources:
-            requests: { cpu: 500m, memory: 1Gi }
-            limits:   { cpu: "4",  memory: 8Gi }
-
-        mariadb:
-          enabled: true
-          primary:
-            persistence:
-              size: 10Gi
-
-        redis:
-          enabled: true
-
-        redpanda:
-          enabled: true
-          statefulset:
-            replicas: 1
-
-        # ────────────────────────────────────────────────────────
-        # Application services
-        # ────────────────────────────────────────────────────────
-        apiGateway:
-          enabled: true
-          replicaCount: 2
-          authDisabled: false
-          oidc:
-            # In prod, create a Secret with the issuer/clientId/audience/redirectUri fields:
-            existingSecret: insight-oidc
-          ingress:
-            enabled: true
-            className: nginx
-            host: insight.example.com
-            tls:
-              enabled: true
-              secretName: insight-tls
-
-        analyticsApi:
-          enabled: true
-          replicaCount: 2
-          clickhouse:
-            credentialsSecret:
-              name: insight-clickhouse-creds
-
-        identity:
-          enabled: false
-
-        frontend:
-          enabled: true
-          replicaCount: 1
-          oidc:
-            # Must match the public part of apiGateway.oidc.clientId.
-            clientId: insight-frontend
-          ingress:
-            enabled: true
-            className: nginx
-            host: app.insight.example.com
+    # 2. Values source (this repo).
+    - repoURL: https://github.com/cyberfabric/insight.git
+      targetRevision: main
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

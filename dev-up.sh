@@ -298,6 +298,16 @@ global:
 EOF
 fi
 
+# Detect whether Argo CRDs are present. Umbrella ships WorkflowTemplate
+# objects which require the Argo CRDs; if Argo was not installed yet
+# (e.g. the dev runs `./dev-up.sh backend`), the umbrella would fail with
+# `no matches for kind "WorkflowTemplate"`. Skip ingestion templates in
+# that case — running `./dev-up.sh ingestion` or `all` installs them.
+ARGO_CRD_GUARD=""
+if ! kubectl get crd workflowtemplates.argoproj.io >/dev/null 2>&1; then
+  ARGO_CRD_GUARD="--set ingestion.templates.enabled=false"
+fi
+
 # ─── Delegate to canonical installers ─────────────────────────────────────
 case "$COMPONENT" in
   all)
@@ -311,30 +321,17 @@ case "$COMPONENT" in
     ;;
   app|backend|frontend)
     # The umbrella deploys EVERYTHING: infra + backend + frontend. For
-    # backend-only or frontend-only runs you could flip individual services
-    # off via values, but in dev it is simpler to keep the full deploy —
-    # helm upgrade is idempotent.
+    # backend-only or frontend-only runs we keep the full deploy —
+    # helm upgrade is idempotent and app services are mandatory
+    # components of the umbrella (no per-service enable flag).
     SKIP_AIRBYTE=1 SKIP_ARGO=1 \
       INSIGHT_NAMESPACE="$NAMESPACE" \
       INSIGHT_VALUES="$DEV_VALUES" \
+      HELM_EXTRA_ARGS="$ARGO_CRD_GUARD" \
       "$ROOT_DIR/deploy/scripts/install.sh"
     ;;
-  infra)
-    # Infra-only (CH/MariaDB/Redis/Redpanda) — install the umbrella with
-    # all app services disabled.
-    cat >> "$DEV_VALUES" <<EOF
-apiGateway:  { enabled: false }
-analyticsApi: { enabled: false }
-identity:    { enabled: false }
-frontend:    { enabled: false }
-EOF
-    SKIP_AIRBYTE=1 SKIP_ARGO=1 \
-      INSIGHT_NAMESPACE="$NAMESPACE" \
-      INSIGHT_VALUES="$DEV_VALUES" \
-      "$ROOT_DIR/deploy/scripts/install-insight.sh"
-    ;;
   *)
-    echo "ERROR: unknown component: $COMPONENT (expected: all|ingestion|app|backend|frontend|infra)" >&2
+    echo "ERROR: unknown component: $COMPONENT (expected: all|ingestion|app|backend|frontend)" >&2
     exit 1
     ;;
 esac

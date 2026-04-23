@@ -14,19 +14,11 @@ Resolved infra endpoints (see ConfigMap {{ .Release.Name }}-platform):
   Redpanda:    {{ include "insight.redpanda.brokers" . }}  {{ if not .Values.redpanda.enabled }}[external]{{ end }}
   Airbyte:     {{ .Values.airbyte.apiUrl }}
 
-Application services:
-{{- if .Values.apiGateway.enabled }}
+Application services (always-on):
   ✓ API Gateway        http://{{ include "insight.apiGateway.host" . }}:8080
-{{- end }}
-{{- if .Values.analyticsApi.enabled }}
   ✓ Analytics API      http://{{ include "insight.analyticsApi.host" . }}:8081
-{{- end }}
-{{- if .Values.identity.enabled }}
   ✓ Identity           http://{{ include "insight.identity.host" . }}:8082
-{{- end }}
-{{- if .Values.frontend.enabled }}
   ✓ Frontend           http://{{ include "insight.frontend.host" . }}:80
-{{- end }}
 {{- if .Values.ingestion.templates.enabled }}
   ✓ Ingestion templates: airbyte-sync, dbt-run, ingestion-pipeline
 {{- end }}

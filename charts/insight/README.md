@@ -65,8 +65,23 @@ Before going to prod:
 - [ ] Enable ingress + TLS: `apiGateway.ingress`, `frontend.ingress`
 - [ ] Bump resources where needed (default `requests` are conservative)
 - [ ] `redpanda.tls.enabled: true`, `redpanda.auth.sasl.enabled: true`
-- [ ] Point MariaDB/ClickHouse/Redis to external managed services if required (set `enabled: false` on the subchart + override URLs in app-service sections)
+- [ ] Point MariaDB/ClickHouse/Redis to external managed services if running inside Constructor Platform (set `enabled: false` on the subchart + fill `external.*` + override URLs in the app-service sections)
 - [ ] Set `global.imagePullSecrets` if pulling from a private registry
+
+## Integration modes
+
+The chart supports two deployment shapes; the pattern is symmetric across every infra dependency (ClickHouse, MariaDB, Redis, Redpanda).
+
+**Standalone** (eval, on-prem single-tenant, dev):
+- `<infra>.enabled: true` — the umbrella deploys the dependency itself.
+- App services connect to the internal DNS (`{release}-clickhouse`, etc.).
+
+**Constructor Platform component** (required when Insight ships inside the platform):
+- `<infra>.enabled: false` — the platform provides the dependency externally.
+- Fill `<infra>.external.host` / `.port` / `.credentialsSecret.name`.
+- App service URLs must be overridden to point at the external hosts (values are not templatable in Helm; see notes in `values.yaml`).
+
+The umbrella validator (`templates/_helpers.tpl` → `insight.validate`) fails fast if `enabled: false` is set without a matching `external.host` — typos do not reach the cluster.
 
 ## Values reference
 
@@ -74,11 +89,12 @@ See comments in [`values.yaml`](./values.yaml) — every block is documented inl
 
 Key groups:
 
-- `global.*` — cluster-wide defaults (registry, pull secrets, storage class)
-- `<infraname>.enabled` — tumbler for each infra subchart (CH, MariaDB, etc.)
-- `<appname>.enabled` + `.image.tag` + `.resources` — per-service knobs
-- `apiGateway.oidc` — OIDC configuration (prefer `existingSecret`)
+- `global.*` — cluster-wide defaults (pull secrets, storage class, bitnami image policy)
+- `<infraname>.enabled` / `<infraname>.external.*` — toggle standalone vs Constructor Platform external
+- `apiGateway` / `analyticsApi` / `identity` / `frontend` — mandatory app services (no enabled-flag; the gateway is the single entrance and the product is one unit)
+- `apiGateway.oidc` — OIDC configuration (prefer `existingSecret`; inline requires `issuer` + `clientId` + `redirectUri` together)
 - `apiGateway.proxy.routes` — reverse-proxy config to downstream services
+- `ingestion.templates.enabled` — whether to ship Argo WorkflowTemplates; requires Argo CRDs to be present in the cluster
 
 ## Operations
 

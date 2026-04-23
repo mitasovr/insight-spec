@@ -1,9 +1,12 @@
 ##
 ## Argo Workflows — additional RBAC for Insight.
 ##
-## argo-workflow-executor — Role bound to the default ServiceAccount
-## in each workflow namespace. Required so the Argo executor can write
-## step results to the K8s API.
+## argo-workflow-executor — Role bound to the `argo-workflow` ServiceAccount
+## in each workflow namespace (created by the chart via
+## `workflow.serviceAccount.create=true` in deploy/argo/values.yaml).
+## Required so the Argo executor sidecar can write step results to the
+## K8s API. Binding to `default` would be a bug: workflow pods run as
+## `argo-workflow`, not as the namespace's default SA.
 ##
 ## Applied by install-argo.sh after the chart is installed.
 ##
@@ -30,7 +33,7 @@ metadata:
   namespace: argo
 subjects:
   - kind: ServiceAccount
-    name: default
+    name: argo-workflow
     namespace: argo
 roleRef:
   kind: Role
@@ -38,7 +41,9 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ---
 # Same Role in the 'insight' namespace — workflows (CronWorkflows
-# shipped by the umbrella) can execute there as well.
+# shipped by the umbrella) can execute there as well. The chart
+# creates the `argo-workflow` SA in every namespace listed in
+# controller.workflowNamespaces.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -62,7 +67,7 @@ metadata:
   namespace: insight
 subjects:
   - kind: ServiceAccount
-    name: default
+    name: argo-workflow
     namespace: insight
 roleRef:
   kind: Role

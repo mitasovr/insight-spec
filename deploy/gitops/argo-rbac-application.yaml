@@ -1,0 +1,42 @@
+##
+## ArgoCD Application: Argo Workflows supplemental RBAC.
+##
+## Companion to argo-application.yaml. The Argo helm chart cannot emit
+## raw Role/RoleBinding for arbitrary workflow namespaces (like `insight`);
+## this Application applies deploy/argo/rbac.yaml from Git so that the
+## argo-workflow ServiceAccount has `workflowtaskresults` / `pods` / `pods/log`
+## permissions in both `argo` and `insight` namespaces.
+##
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-workflows-rbac
+  namespace: argocd
+  annotations:
+    # Runs after argo-workflows (also wave 0) finishes creating the SAs.
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/cyberfabric/insight.git
+    targetRevision: main
+    path: deploy/argo
+    directory:
+      include: 'rbac.yaml'
+
+  destination:
+    server: https://kubernetes.default.svc
+    # Destination namespace is ignored here — rbac.yaml ships manifests
+    # with explicit namespaces (argo, insight).
+    namespace: argo
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

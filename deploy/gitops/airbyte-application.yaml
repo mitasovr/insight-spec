@@ -4,8 +4,12 @@
 ## Sync wave 0 — installed FIRST, before Insight.
 ## The Insight Application waits until this one becomes Healthy.
 ##
-## Values are inlined for simplicity. To keep values in Git, use
-## `source.helm.valueFiles` pointing at a file in the repo.
+## Values come from deploy/airbyte/values.yaml via a multi-source setup
+## (ArgoCD 2.6+). This keeps a SINGLE source of truth for Airbyte config
+## — `install-airbyte.sh` and this Application render identical manifests.
+##
+## To customize, fork this repo and either edit values.yaml in-place or
+## add a second valueFile pointing at your own overrides.
 ##
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -17,53 +21,28 @@ metadata:
     argocd.argoproj.io/sync-wave: "0"
   finalizers:
     # On Application deletion, cascade-delete the created resources.
-    # Remove this if you don't want that behavior.
     - resources-finalizer.argocd.argoproj.io
 
 spec:
   project: default
 
-  source:
-    repoURL: https://airbytehq.github.io/helm-charts
-    chart: airbyte
-    # Version pin — REQUIRED for reproducible deploys.
-    targetRevision: 1.5.1
+  sources:
+    # 1. The Airbyte helm chart.
+    - repoURL: https://airbytehq.github.io/helm-charts
+      chart: airbyte
+      # Version pin — REQUIRED for reproducible deploys.
+      targetRevision: 1.5.1
+      helm:
+        releaseName: airbyte
+        valueFiles:
+          # $values is resolved against the ref=values source below.
+          - $values/deploy/airbyte/values.yaml
 
-    helm:
-      releaseName: airbyte
-      # Values are inlined. For large configs, move them to a separate repo
-      # and reference it with multi-source (sources: [helm_chart, values_repo]).
-      values: |
-        global:
-          edition: community
-          auth:
-            enabled: false
-          storage:
-            type: minio
-          database:
-            type: internal
-        postgresql:
-          enabled: true
-        minio:
-          enabled: true
-        keycloak:
-          enabled: false
-        keycloak-setup:
-          enabled: false
-        server:
-          resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits:   { cpu: "1",  memory: 1Gi }
-        webapp:
-          resources:
-            requests: { cpu: 50m,  memory: 128Mi }
-            limits:   { cpu: 500m, memory: 512Mi }
-          ingress:
-            enabled: false
-        worker:
-          resources:
-            requests: { cpu: 200m, memory: 512Mi }
-            limits:   { cpu: "2",  memory: 2Gi }
+    # 2. Values source (this repo). `ref` makes it available for
+    #    $values substitution above and does not sync manifests from it.
+    - repoURL: https://github.com/cyberfabric/insight.git
+      targetRevision: main
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

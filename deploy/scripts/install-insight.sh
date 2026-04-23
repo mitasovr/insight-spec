@@ -73,11 +73,20 @@ fi
 VALUES_ARGS=()
 [[ -n "$EXTRA_VALUES" ]] && VALUES_ARGS+=(-f "$EXTRA_VALUES")
 
+# HELM_EXTRA_ARGS: caller-supplied passthrough (e.g. --set flags). Split
+# on whitespace — caller is responsible for not embedding spaces.
+EXTRA_ARGS=()
+if [[ -n "${HELM_EXTRA_ARGS:-}" ]]; then
+  # shellcheck disable=SC2206
+  EXTRA_ARGS=($HELM_EXTRA_ARGS)
+fi
+
 log "Running helm upgrade --install"
 helm upgrade --install "$RELEASE" "$CHART_REF" \
   --namespace "$NAMESPACE" --create-namespace \
   "${VERSION_ARG[@]}" \
   "${VALUES_ARGS[@]}" \
+  "${EXTRA_ARGS[@]}" \
   --wait --timeout 10m
 
 # ─── Summary ───────────────────────────────────────────────────────────

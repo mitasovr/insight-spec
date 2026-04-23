@@ -4,6 +4,14 @@
 ## Sync wave 0 — installed in parallel with Airbyte, before Insight.
 ## Insight (wave 1) waits until both infra apps become Healthy.
 ##
+## Values come from deploy/argo/values.yaml via a multi-source setup
+## so this Application and `install-argo.sh` render identical manifests.
+##
+## The supplemental RBAC (deploy/argo/rbac.yaml) is deployed as a
+## separate ArgoCD Application or applied out-of-band — ArgoCD's
+## helm-chart source cannot emit additional raw manifests next to the
+## chart. See deploy/gitops/README.md.
+##
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -17,36 +25,18 @@ metadata:
 spec:
   project: default
 
-  source:
-    repoURL: https://argoproj.github.io/argo-helm
-    chart: argo-workflows
-    targetRevision: 0.45.16
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-workflows
+      targetRevision: 0.45.16
+      helm:
+        releaseName: argo-workflows
+        valueFiles:
+          - $values/deploy/argo/values.yaml
 
-    helm:
-      releaseName: argo-workflows
-      values: |
-        server:
-          extraArgs:
-            - "--auth-mode=client"
-          serviceType: ClusterIP
-          resources:
-            requests: { cpu: 100m, memory: 128Mi }
-            limits:   { cpu: 500m, memory: 256Mi }
-        controller:
-          workflowNamespaces:
-            - argo
-            - insight
-          resources:
-            requests: { cpu: 200m, memory: 256Mi }
-            limits:   { cpu: "1",  memory: 512Mi }
-        workflow:
-          serviceAccount:
-            create: true
-            name: argo-workflow
-        executor:
-          resources:
-            requests: { cpu: 50m,  memory: 64Mi }
-            limits:   { cpu: 250m, memory: 128Mi }
+    - repoURL: https://github.com/cyberfabric/insight.git
+      targetRevision: main
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc
