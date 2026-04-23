@@ -138,8 +138,7 @@ docs/
 │   │   ├── collaboration/        ← Microsoft 365, Slack, Zoom, Zulip
 │   │   ├── wiki/                 ← Confluence, Outline
 │   │   ├── support/              ← Zendesk, Jira Service Management
-│   │   ├── ai-dev/               ← Cursor, Windsurf, GitHub Copilot, JetBrains
-│   │   ├── ai/                   ← Claude API, Claude Team, OpenAI API, ChatGPT Team
+│   │   ├── ai/                   ← Claude Admin, Claude Enterprise, Cursor, Windsurf, GitHub Copilot, JetBrains, OpenAI API, ChatGPT Team
 │   │   ├── hr-directory/         ← BambooHR, Workday, LDAP / Active Directory
 │   │   ├── crm/                  ← HubSpot, Salesforce
 │   │   ├── ui-design/            ← Figma
@@ -199,7 +198,7 @@ This repo uses [Cypilot](https://github.com/cyberfabric/cyber-pilot) — an AI a
 | Wiki | Confluence, Outline | `class_wiki_pages`, `class_wiki_activity` |
 | Support | Zendesk, JSM | `class_support_activity` |
 | AI Dev Tools | Cursor, Windsurf, Copilot, JetBrains | `class_ai_dev_usage` |
-| AI Tools | Claude API/Team, OpenAI API, ChatGPT Team | `class_ai_api_usage`, `class_ai_tool_usage` |
+| AI Tools | Claude Admin, Claude Enterprise, OpenAI API, ChatGPT Team | `class_ai_api_usage`, `class_ai_tool_usage` |
 | HR / Directory | BambooHR, Workday, LDAP | `class_people`, `class_org_units` |
 | CRM | HubSpot, Salesforce | TBD |
 | Design Tools | Figma | `class_design_activity` |
@@ -294,6 +293,57 @@ cd src/ingestion
 | `./init.sh` | Apply secrets + initialize ingestion stack |
 | `./dev-down.sh` | Stop all services (data preserved) |
 | `./cleanup.sh` | Delete cluster and all data |
+
+### Image configuration
+
+Service images are controlled via environment variables in `.env.<name>`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IMAGE_REGISTRY` | _(empty)_ | Registry prefix, e.g. `ghcr.io/cyberfabric` |
+| `IMAGE_TAG` | `local` | Default image tag for all services |
+| `API_GATEWAY_IMAGE_TAG` | `$IMAGE_TAG` | Override tag for api-gateway |
+| `ANALYTICS_API_IMAGE_TAG` | `$IMAGE_TAG` | Override tag for analytics-api |
+| `IDENTITY_IMAGE_TAG` | `$IMAGE_TAG` | Override tag for identity-resolution |
+| `TOOLBOX_IMAGE_TAG` | `$IMAGE_TAG` | Override tag for insight-toolbox |
+| `IMAGE_PULL_POLICY` | `IfNotPresent` | Kubernetes pull policy |
+| `BUILD_IMAGES` | `true` | Build images locally before deploy |
+| `BUILD_AND_PUSH` | `false` | Push built images to registry |
+| `IMAGE_PLATFORM` | _(empty)_ | Cross-build platform, e.g. `linux/amd64` |
+
+To deploy a specific version instead of `latest`:
+
+```bash
+# In .env.virtuozzo (or any remote env file)
+IMAGE_REGISTRY=ghcr.io/cyberfabric
+IMAGE_TAG=2026.04.21.14.30-abc1234    # default for all services
+BUILD_IMAGES=false
+```
+
+To pin individual services to different versions:
+
+```bash
+IMAGE_TAG=2026.04.21.14.30-abc1234
+ANALYTICS_API_IMAGE_TAG=2026.04.20.09.15-def5678   # override just analytics-api
+```
+
+The Argo workflow templates (`dbt-run`, `ingestion-pipeline`) also accept a
+`toolbox_image` parameter to override the toolbox image at submission time.
+
+### CI/CD
+
+GitHub Actions builds and pushes container images on every merge to `main`
+(see `.github/workflows/build-images.yml`). Images are tagged as
+`YYYY.MM.DD.HH.mm-<short-sha>` and `latest`.
+
+| Image | Trigger path |
+|-------|-------------|
+| `insight-api-gateway` | `src/backend/**` |
+| `insight-analytics-api` | `src/backend/**` |
+| `insight-identity-resolution` | `src/backend/**` |
+| `insight-toolbox` | `src/ingestion/**` |
+
+To trigger a build manually: Actions → "Build & Push Container Images" → Run workflow.
 
 ### Running without Kubernetes
 

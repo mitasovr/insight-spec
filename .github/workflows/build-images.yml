@@ -6,11 +6,14 @@ on:
     paths:
       - "src/backend/**"
       - "src/ingestion/**"
+      - ".github/workflows/build-images.yml"
   pull_request:
     branches: [main]
     paths:
       - "src/backend/**"
       - "src/ingestion/**"
+      - ".github/workflows/build-images.yml"
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -39,7 +42,7 @@ jobs:
 
   backend:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -66,14 +69,14 @@ jobs:
         with:
           images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
           tags: |
+            type=raw,value={{date 'YYYY.MM.DD.HH.mm'}}-{{sha}},enable={{is_default_branch}}
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=
 
       - uses: docker/build-push-action@v6
         with:
           context: src/backend
           file: src/backend/${{ matrix.dockerfile }}
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -81,7 +84,7 @@ jobs:
 
   toolbox:
     needs: changes
-    if: needs.changes.outputs.ingestion == 'true'
+    if: needs.changes.outputs.ingestion == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -99,14 +102,14 @@ jobs:
         with:
           images: ${{ env.IMAGE_PREFIX }}/insight-toolbox
           tags: |
+            type=raw,value={{date 'YYYY.MM.DD.HH.mm'}}-{{sha}},enable={{is_default_branch}}
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=
 
       - uses: docker/build-push-action@v6
         with:
           context: src/ingestion
           file: src/ingestion/tools/toolbox/Dockerfile
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

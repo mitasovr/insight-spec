@@ -13,6 +13,8 @@ spec:
           - name: connection_id
           - name: dbt_select
             default: "tag:silver"
+          - name: toolbox_image
+            default: "ghcr.io/cyberfabric/insight-toolbox:latest"
           - name: airbyte_url
             default: "__AIRBYTE_URL__"
           - name: clickhouse_host
@@ -40,6 +42,8 @@ spec:
               parameters:
                 - name: dbt_select
                   value: "{{inputs.parameters.dbt_select}}"
+                - name: toolbox_image
+                  value: "{{inputs.parameters.toolbox_image}}"
                 - name: clickhouse_host
                   value: "{{inputs.parameters.clickhouse_host}}"
                 - name: clickhouse_port

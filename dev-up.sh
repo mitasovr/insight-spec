@@ -188,9 +188,17 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 # ─── Image build (dev-only) ───────────────────────────────────────────────
 # For the dev loop we build container images from src/ and load them into
 # Kind. Prod customers use pre-published images from ghcr.io.
+
+image_tag_for() {
+  local svc="$1"
+  # Per-service override: API_GATEWAY_IMAGE_TAG, ANALYTICS_API_IMAGE_TAG, etc.
+  local var_name; var_name="$(echo "$svc" | tr '[:lower:]-' '[:upper:]_')_IMAGE_TAG"
+  echo "${!var_name:-$IMAGE_TAG}"
+}
+
 image_ref() {
   local svc="$1"
-  echo "${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}insight-${svc}:${IMAGE_TAG}"
+  echo "${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}insight-${svc}:$(image_tag_for "$svc")"
 }
 
 build_and_load_image() {
