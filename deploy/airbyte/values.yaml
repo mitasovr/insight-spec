@@ -1,39 +1,39 @@
 ##
 ## Airbyte — curated values for Insight.
 ##
-## Применяется к ОФИЦИАЛЬНОМУ чарту airbyte/airbyte, а не к какому-то
-## своему wrapper'у — кастомизация только через values (см. install-airbyte.sh).
+## Applied to the OFFICIAL airbyte/airbyte chart, not a wrapper —
+## customization is values-only (see install-airbyte.sh).
 ##
-## Версия чарта: пиним отдельно в скрипте/GitOps-манифесте. Текущий выбор: 1.5.1.
+## Chart version is pinned in the installer / GitOps manifest. Current: 1.5.1.
 ##
-## Что здесь:
-##   - безопасные дефолты для eval/demo (embedded Postgres + MinIO)
-##   - документированные точки кастомизации для prod (external DB, S3, auth)
-##   - отключён Keycloak (Insight использует свою OIDC-плоскость)
+## What is here:
+##   - safe defaults for eval/demo (embedded Postgres + MinIO)
+##   - documented customization points for prod (external DB, S3, auth)
+##   - Keycloak disabled (Insight uses its own OIDC surface)
 ##
-## Конвенции для интеграции с Insight:
+## Integration conventions with Insight:
 ##   - namespace: airbyte
 ##   - release name: airbyte
 ##   - server service: airbyte-airbyte-server-svc
 ##   - port: 8001
 ##   - auth: JWT signed with AB_JWT_SIGNATURE_SECRET
-## Ingestion-код в `src/ingestion/` ожидает именно эти имена.
+## The ingestion code under `src/ingestion/` expects these exact names.
 ##
 
 global:
-  # Deployment mode. community = OSS, enterprise = коммерческая лицензия.
+  # Deployment mode. community = OSS, enterprise = commercial license.
   edition: community
 
-  # Auth. Keycloak тянет ещё один Postgres + сервис. У нас своя OIDC-плоскость
-  # через apiGateway.oidc в umbrella, поэтому выключаем.
+  # Auth. Keycloak pulls in an additional Postgres and a service. We have
+  # our own OIDC surface via apiGateway.oidc in the umbrella, so it is off.
   auth:
     enabled: false
 
-  # Хранилище для логов и state.
-  # По дефолту — embedded MinIO. Для prod → s3/gcs/azure (см. ниже).
+  # Storage for logs and state.
+  # Defaults to embedded MinIO. For prod → s3/gcs/azure (see below).
   storage:
     type: minio
-    # ── Пример переопределения на S3 (раскомментировать в prod-values):
+    # ── Example S3 override (uncomment in prod-values):
     # type: s3
     # bucket:
     #   log: insight-airbyte-logs
@@ -41,18 +41,18 @@ global:
     #   workloadOutput: insight-airbyte-output
     # s3:
     #   region: eu-west-1
-    #   authenticationType: credentials   # или instanceProfile
-    # # Creds в предсозданном Secret в namespace airbyte:
+    #   authenticationType: credentials   # or instanceProfile
+    # # Creds in a pre-created Secret in the airbyte namespace:
     # #   kubectl -n airbyte create secret generic airbyte-s3-creds \
     # #     --from-literal=AWS_ACCESS_KEY_ID=... \
     # #     --from-literal=AWS_SECRET_ACCESS_KEY=...
     # storageSecretName: airbyte-s3-creds
 
-  # БД состояния Airbyte. По дефолту — embedded Postgres (subchart).
-  # Для prod → внешняя managed БД.
+  # Airbyte state DB. Defaults to embedded Postgres (subchart).
+  # For prod → external managed DB.
   database:
     type: internal
-    # ── Пример external:
+    # ── External example:
     # type: external
     # host: postgres.insight.svc.cluster.local
     # port: 5432
@@ -62,23 +62,23 @@ global:
     # passwordSecretKey: password
 
 # ─── Embedded subcharts ─────────────────────────────────────────────────
-# В prod оба выключаются — тогда global.database.type=external
-# и global.storage.type=s3 должны указывать на внешние ресурсы.
+# Both should be disabled in prod — then global.database.type=external
+# and global.storage.type=s3 must point at external resources.
 postgresql:
   enabled: true
 minio:
   enabled: true
 
-# ─── Keycloak выключен ──────────────────────────────────────────────────
-# Authentication к Airbyte API идёт через server-signed JWT (см. env.sh).
-# Настоящий enterprise-auth будет реализован на уровне Insight.
+# ─── Keycloak disabled ──────────────────────────────────────────────────
+# Authentication to the Airbyte API is done via a server-signed JWT
+# (see env.sh). Real enterprise auth is handled at the Insight layer.
 keycloak:
   enabled: false
 keycloak-setup:
   enabled: false
 
-# ─── Ресурсы (минимальный eval-профиль) ─────────────────────────────────
-# Для prod — 3-5x по лимитам, см. deploy/airbyte/values-prod.yaml
+# ─── Resources (minimal eval profile) ───────────────────────────────────
+# For prod — 3-5x these limits; see deploy/airbyte/values-prod.yaml.
 server:
   replicaCount: 1
   resources:
@@ -90,8 +90,8 @@ webapp:
   resources:
     requests: { cpu: 50m,  memory: 128Mi }
     limits:   { cpu: 500m, memory: 512Mi }
-  # Ingress к Airbyte UI. В prod обычно за своим OIDC-прокси,
-  # для eval — port-forward достаточно.
+  # Ingress for the Airbyte UI. In prod typically behind your own OIDC proxy;
+  # for eval a port-forward is enough.
   ingress:
     enabled: false
 
@@ -121,7 +121,7 @@ cron:
     requests: { cpu: 50m,  memory: 128Mi }
     limits:   { cpu: 200m, memory: 256Mi }
 
-# Connector Builder UI. Для dev можно выключить чтобы экономить ресурсы;
-# для prod держим включённым — пригодится для Low-Code Connectors.
+# Connector Builder UI. In dev you may turn it off to save resources;
+# for prod keep it on — useful for Low-Code Connectors.
 connectorBuilderServer:
   enabled: true

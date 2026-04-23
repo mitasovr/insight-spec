@@ -1,9 +1,9 @@
 ##
-## Insight umbrella — дефолтные values.
+## Insight umbrella — default values.
 ##
-## Клиент поверх этого кладёт СВОЙ values.yaml с секретами/хостами/тюнингом.
+## Customers override these with their own values.yaml (secrets, hosts, tuning).
 ##
-## Команды для проверки:
+## Commands for verification:
 ##   helm dependency update charts/insight
 ##   helm template insight charts/insight | less
 ##   helm template insight charts/insight -f my-values.yaml | less
@@ -11,51 +11,52 @@
 ## ─────────────────────────────────────────────────────────────────────────
 ## Conventions
 ## ─────────────────────────────────────────────────────────────────────────
-## 1. Release name = `insight`. Все внутренние DNS-имена собираются как
+## 1. Release name = `insight`. All internal DNS names follow the pattern
 ##    `{.Release.Name}-{component}` (insight-clickhouse, insight-mariadb,
-##    insight-api-gateway, …). При смене release-имени переопредели
-##    соответствующие URL-ы в своих values.
+##    insight-api-gateway, ...). If you deploy under a different release
+##    name, override the corresponding URLs in your values.
 ##
-## 2. Все зависимости деплоятся в ОДНУ namespace — namespace релиза.
-##    Airbyte и Argo Workflows — отдельные релизы в своих ns (см. deploy/).
+## 2. Every dependency is deployed into a SINGLE namespace — the release
+##    namespace. Airbyte and Argo Workflows are separate releases with
+##    their own namespaces (see deploy/).
 ##
-## 3. Каждая инфра-зависимость имеет `enabled: true/false`:
-##      - enabled: true  → поднимается встроенный subchart
-##      - enabled: false → используется внешний сервис; обязательно заполни
-##                         блок `external:` (host/port/secrets)
-##    Валидатор в templates/_helpers.tpl падает с понятной ошибкой,
-##    если `enabled: false` без `external.host`.
+## 3. Each infra dependency has an `enabled: true/false` switch:
+##      - enabled: true  → bundled subchart is installed
+##      - enabled: false → external service is used; the `external:` block
+##                         must be filled (host/port/secrets)
+##    The validator in templates/_helpers.tpl fails fast with a clear
+##    error message when `enabled: false` is used without `external.host`.
 ##
-## 4. Resolved координаты инфры (URL-ы, host'ы) живут в одном ConfigMap
-##    `{release}-platform` (см. templates/platform-config.yaml). Любой pod
-##    в ns может прочитать их через `envFrom`.
+## 4. Resolved infra coordinates (URLs, hosts) live in a single ConfigMap
+##    named `{release}-platform` (see templates/platform-config.yaml).
+##    Any pod in the namespace can read them via `envFrom`.
 ##
 
 # ─── Global values ────────────────────────────────────────────────────────
-# Всё под `global:` видно всем subchart'ам автоматически.
-# ВАЖНО: bitnami-чарты читают `global.imageRegistry` и перекраивают свои
-# образы. НЕ ставим `imageRegistry` глобально — каждый наш сервис указывает
-# свой `image.repository` явно.
+# Everything under `global:` is visible to all subcharts automatically.
+# IMPORTANT: bitnami charts read `global.imageRegistry` and rewrite all
+# their images to use it. Do NOT set `imageRegistry` here — each of our
+# services sets `image.repository` explicitly.
 global:
-  imagePullSecrets: []         # pull-secrets для приватного registry
-  storageClass: ""             # пусто = дефолтный StorageClass кластера
+  imagePullSecrets: []         # pull-secrets for a private registry
+  storageClass: ""             # empty = default StorageClass of the cluster
   security:
-    # bitnami-чарты проверяют, что образ — из их "secure images" списка.
-    # Мы используем bitnamilegacy (см. mariadb.image/redis.image) — нужно
-    # разрешить "небезопасные" образы, иначе чарт отказывается деплоить.
+    # bitnami charts check that the image belongs to their "secure images"
+    # list. We use bitnamilegacy (see mariadb.image / redis.image) so we
+    # have to allow "insecure" images — otherwise the chart refuses to deploy.
     allowInsecureImages: true
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  EXTERNAL — Airbyte (ставится отдельным Helm release)
+#  EXTERNAL — Airbyte (installed as a separate Helm release)
 # ═══════════════════════════════════════════════════════════════════════════
 airbyte:
   apiUrl: "http://airbyte-airbyte-server-svc.airbyte.svc.cluster.local:8001"
   jwtSecret:
-    name: airbyte-auth-secrets       # зеркалится install-airbyte.sh
+    name: airbyte-auth-secrets       # mirrored by install-airbyte.sh
     key:  jwt-signature-secret
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  INGESTION — WorkflowTemplates (контент для Argo)
+#  INGESTION — WorkflowTemplates (content for Argo)
 # ═══════════════════════════════════════════════════════════════════════════
 ingestion:
   templates:
@@ -65,43 +66,43 @@ ingestion:
 #  INFRASTRUCTURE
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# Паттерн для каждой:
-#   <dep>.enabled      — true = поднять встроенный subchart
-#   <dep>.external.*   — координаты внешнего сервиса, когда enabled=false
-#   <dep>.auth.*       — creds для встроенного subchart, когда enabled=true
+# Pattern for each dependency:
+#   <dep>.enabled      — true = install bundled subchart
+#   <dep>.external.*   — coordinates of the external service when enabled=false
+#   <dep>.auth.*       — credentials for the bundled subchart when enabled=true
 #
 
 # ─── ClickHouse ──────────────────────────────────────────────────────────
 clickhouse:
   enabled: true
-  database: "insight"           # имя БД, используется и внутренним и external
+  database: "insight"           # DB name, used for both internal and external
 
   image:
     repository: clickhouse/clickhouse-server
     tag: "25.3"
   auth:
     username: insight
-    password: "changeme"        # override в prod
+    password: "changeme"        # override in prod
   persistence:
     size: 10Gi
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits:   { cpu: "2",  memory: 4Gi   }
 
-  # BYO-режим: заполни и поставь enabled=false
+  # BYO mode: fill these in and set enabled=false
   external:
     host: ""                     # e.g. clickhouse.internal.acme.com
     port: 8123
     credentialsSecret:
-      name: ""                   # Secret в insight-ns с полями username/password
+      name: ""                   # Secret in the insight ns with username/password keys
       userKey: "username"
       passwordKey: "password"
 
 # ─── MariaDB (bitnami) ───────────────────────────────────────────────────
-# NB: bitnami в 2025 убрал свободные образы из docker.io/bitnami/*
-# (см. https://github.com/bitnami/charts/issues/30850). Мы указываем
-# bitnamilegacy репозиторий — он содержит те же образы, пока бесплатный.
-# Для enterprise — поставьте свой registry (и `global.security.allowInsecureImages`).
+# NB: bitnami removed free images from docker.io/bitnami/* in 2025
+# (see https://github.com/bitnami/charts/issues/30850). We point at the
+# bitnamilegacy repository — same images, still free. For enterprise use
+# your own registry (and set `global.security.allowInsecureImages`).
 mariadb:
   enabled: true
   architecture: standalone
@@ -125,12 +126,12 @@ mariadb:
     port: 3306
     database: "insight"
     credentialsSecret:
-      name: ""                   # Secret с полями username/password
+      name: ""                   # Secret with username/password keys
       userKey: "username"
       passwordKey: "password"
 
 # ─── Redis (bitnami) ─────────────────────────────────────────────────────
-# Тот же вопрос с registry, что и у mariadb. См. коммент выше.
+# Same registry caveat as mariadb above.
 redis:
   enabled: true
   architecture: standalone
@@ -138,7 +139,7 @@ redis:
     registry: docker.io
     repository: bitnamilegacy/redis
   auth:
-    enabled: false              # eval. Для prod → true + passwordSecret
+    enabled: false              # eval default. For prod → true + passwordSecret
   master:
     persistence:
       size: 1Gi
@@ -154,6 +155,7 @@ redis:
       key: "password"
 
 # ─── Redpanda ────────────────────────────────────────────────────────────
+# For enterprise: TLS on, SASL on, 3+ replicas.
 redpanda:
   enabled: true
   statefulset:
@@ -194,14 +196,15 @@ redpanda:
 #  APPLICATION SERVICES
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# ВНИМАНИЕ: значения `<svc>.database.url`, `<svc>.clickhouse.url`, `<svc>.redis.url`
-# захардкожены на internal DNS. Helm не умеет template-ить values, поэтому при
-# переключении инфры на external (enabled: false + external.host: ...) ты
-# ДОЛЖЕН переопределить соответствующие URL-ы здесь в своих overrides.
+# NOTE: values like `<svc>.database.url`, `<svc>.clickhouse.url`,
+# `<svc>.redis.url` are hardcoded to the internal DNS. Helm cannot
+# template values files, so when you flip infra to external mode
+# (enabled: false + external.host: ...) you MUST also override the
+# corresponding URLs in your overrides.
 #
-# Лучший путь — перевести эти сервисы на чтение из {release}-platform
-# ConfigMap через envFrom (см. templates/platform-config.yaml). Тогда URL-ы
-# станут вообще не нужны в values. Будет сделано в следующей итерации.
+# Preferred long-term path: migrate these services to read from the
+# {release}-platform ConfigMap via envFrom (see templates/platform-config.yaml).
+# Then URLs become unnecessary in values. Planned for the next iteration.
 
 # ─── API Gateway ─────────────────────────────────────────────────────────
 apiGateway:
@@ -223,8 +226,9 @@ apiGateway:
       enabled: false
       secretName: ""
 
-  # OIDC (обязательно в prod — либо existingSecret, либо inline issuer+clientId+redirectUri).
-  # Валидатор умбрелы падает, если authDisabled=false и oidc не заполнен.
+  # OIDC (required in prod — either existingSecret, or inline
+  # issuer+clientId+redirectUri). The umbrella validator fails when
+  # authDisabled=false and oidc is empty.
   oidc:
     existingSecret: ""
     issuer: ""
@@ -232,10 +236,10 @@ apiGateway:
     clientId: ""
     redirectUri: ""
 
-  authDisabled: false           # true = отключить auth (ТОЛЬКО local dev)
+  authDisabled: false           # true = disable auth (LOCAL DEV ONLY)
 
   clickhouse:
-    url: "http://insight-clickhouse:8123"   # должно совпадать с resolved URL
+    url: "http://insight-clickhouse:8123"   # must match the resolved URL
     database: "gold"
 
   gateway:
@@ -276,14 +280,14 @@ analyticsApi:
     password: "changeme"
 
   identityResolution:
-    url: ""                     # "" = не использовать identity
+    url: ""                     # "" = identity service not used
 
   redis:
     url: "redis://insight-redis-master:6379"
 
 # ─── Identity Resolution ─────────────────────────────────────────────────
 identity:
-  enabled: false                # MVP-заглушка
+  enabled: false                # MVP stub, off by default
   replicaCount: 1
   image:
     repository: ghcr.io/cyberfabric/insight-identity-resolution

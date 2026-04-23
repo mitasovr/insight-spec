@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Insight umbrella values",
-  "description": "Минимальная схема. Расширяется по мере стабилизации values.",
+  "description": "Minimal schema. Expands as values stabilize.",
   "type": "object",
   "properties": {
     "global": {

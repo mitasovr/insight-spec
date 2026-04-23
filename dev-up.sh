@@ -186,8 +186,8 @@ fi
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
 # ─── Image build (dev-only) ───────────────────────────────────────────────
-# Для dev-цикла собираем контейнеры из src/ и грузим в Kind.
-# Prod-клиенты используют уже опубликованные образы из ghcr.io.
+# For the dev loop we build container images from src/ and load them into
+# Kind. Prod customers use pre-published images from ghcr.io.
 image_ref() {
   local svc="$1"
   echo "${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}insight-${svc}:${IMAGE_TAG}"
@@ -225,7 +225,7 @@ if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "backend
 fi
 
 if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "frontend" ]]; then
-  # Frontend — всегда pull, билд происходит в insight-front репо.
+  # Frontend — always pull; it is built in the insight-front repo.
   FE_REPO="${FE_IMAGE_REPOSITORY:-ghcr.io/cyberfabric/insight-front}"
   FE_TAG="${FE_IMAGE_TAG:-latest}"
   FE_IMAGE="${FE_REPO}:${FE_TAG}"
@@ -235,8 +235,9 @@ if [[ "$COMPONENT" == "all" || "$COMPONENT" == "app" || "$COMPONENT" == "fronten
 fi
 
 # ─── Generate dev overrides for umbrella ──────────────────────────────────
-# Канонический installer читает values.yaml умбрелы + наш override-файл.
-# Здесь мы генерим override из env-переменных dev-up.sh (.env.<env>).
+# The canonical installer reads the umbrella values.yaml plus our override
+# file. Here we generate that override from the env vars loaded in
+# dev-up.sh (.env.<env>).
 DEV_VALUES=$(mktemp)
 trap 'rm -f "$DEV_VALUES"' EXIT
 
@@ -309,17 +310,18 @@ case "$COMPONENT" in
     "$ROOT_DIR/deploy/scripts/install-argo.sh"
     ;;
   app|backend|frontend)
-    # Umbrella разворачивает ВСЁ: infra + backend + frontend. Для backend-only
-    # или frontend-only возможны точечные выключения через values, но на dev
-    # проще оставить full deploy — helm upgrade идемпотентен.
+    # The umbrella deploys EVERYTHING: infra + backend + frontend. For
+    # backend-only or frontend-only runs you could flip individual services
+    # off via values, but in dev it is simpler to keep the full deploy —
+    # helm upgrade is idempotent.
     SKIP_AIRBYTE=1 SKIP_ARGO=1 \
       INSIGHT_NAMESPACE="$NAMESPACE" \
       INSIGHT_VALUES="$DEV_VALUES" \
       "$ROOT_DIR/deploy/scripts/install.sh"
     ;;
   infra)
-    # Только зависимости (CH/MariaDB/Redis/Redpanda) — через umbrella
-    # с выключенными app-service'ами.
+    # Infra-only (CH/MariaDB/Redis/Redpanda) — install the umbrella with
+    # all app services disabled.
     cat >> "$DEV_VALUES" <<EOF
 apiGateway:  { enabled: false }
 analyticsApi: { enabled: false }

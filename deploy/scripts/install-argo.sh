@@ -2,9 +2,9 @@
 #
 # Install/upgrade Argo Workflows as a standalone Helm release.
 #
-# Устанавливает инфраструктуру для ingestion-pipelines.
-# WorkflowTemplates (airbyte-sync/dbt-run/ingestion-pipeline) поставляются
-# отдельно через umbrella-чарт Insight — см. values.ingestion.templates.enabled.
+# Installs the engine for ingestion pipelines.
+# WorkflowTemplates (airbyte-sync/dbt-run/ingestion-pipeline) are shipped
+# separately via the Insight umbrella chart — see values.ingestion.templates.enabled.
 #
 # Environment overrides:
 #   ARGO_NAMESPACE     (default: argo)
@@ -12,7 +12,7 @@
 #   ARGO_VERSION       (default: 0.45.16)
 #   ARGO_VALUES        (default: deploy/argo/values.yaml)
 #   ARGO_RBAC          (default: deploy/argo/rbac.yaml)
-#   EXTRA_VALUES_FILE  additional -f file (для prod-оверрайдов)
+#   EXTRA_VALUES_FILE  additional -f file (for prod overrides)
 #
 # Usage:
 #   ./deploy/scripts/install-argo.sh
@@ -50,7 +50,7 @@ if ! helm repo list 2>/dev/null | grep -q '^argo\s'; then
 fi
 helm repo update argo >/dev/null
 
-# ─── Pre-create namespaces (RBAC ссылается на ns 'insight') ────────────
+# ─── Pre-create namespaces (rbac.yaml references the 'insight' ns) ─────
 for ns in argo insight; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 done
@@ -81,7 +81,7 @@ Verify:
   # then open http://localhost:2746
 
 Insight WorkflowTemplates will be deployed by the umbrella chart
-(ingestion.templates.enabled=true) into 'insight' namespace.
+(ingestion.templates.enabled=true) into the 'insight' namespace.
 
 Next step:
   ./deploy/scripts/install-insight.sh

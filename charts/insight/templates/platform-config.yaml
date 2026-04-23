@@ -1,17 +1,17 @@
 {{/*
-Единый ConfigMap со всеми resolved координатами инфры.
+Single ConfigMap that exposes all resolved infra coordinates.
 
-Любой pod в namespace'е insight монтирует его через `envFrom`:
+Any pod in the insight namespace mounts it via envFrom:
   envFrom:
     - configMapRef:
         name: {{ .Release.Name }}-platform
 
-и получает набор env переменных: CLICKHOUSE_URL, MARIADB_HOST,
-AIRBYTE_API_URL и т.д. — независимо от того, внутренние это сервисы
-или external (разница прячется в helper'ах).
+and gets a set of env variables: CLICKHOUSE_URL, MARIADB_HOST,
+AIRBYTE_API_URL, etc. — regardless of whether the services are
+internal or external (the difference is hidden inside helpers).
 
-Это единственное место в umbrella, где видны DNS-имена сервисов.
-Если SRE захочет переименовать — правим только _helpers.tpl.
+This is the only place in the umbrella where DNS names of services
+are visible. If SRE asks to rename something, only _helpers.tpl changes.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -39,12 +39,12 @@ data:
   # ─── Redpanda (Kafka-compatible) ───
   REDPANDA_BROKERS: {{ include "insight.redpanda.brokers" . | quote }}
 
-  # ─── Airbyte (external release, см. deploy/airbyte) ───
+  # ─── Airbyte (external release, see deploy/airbyte) ───
   AIRBYTE_API_URL:          {{ .Values.airbyte.apiUrl       | quote }}
   AIRBYTE_JWT_SECRET_NAME:  {{ .Values.airbyte.jwtSecret.name | quote }}
   AIRBYTE_JWT_SECRET_KEY:   {{ .Values.airbyte.jwtSecret.key  | quote }}
 
-  # ─── App service hosts (для sidecar-ов и debug'а) ───
+  # ─── App service hosts (for sidecars and debugging) ───
   INSIGHT_API_GATEWAY_HOST:   {{ include "insight.apiGateway.host"   . | quote }}
   INSIGHT_ANALYTICS_API_HOST: {{ include "insight.analyticsApi.host" . | quote }}
   INSIGHT_IDENTITY_HOST:      {{ include "insight.identity.host"     . | quote }}

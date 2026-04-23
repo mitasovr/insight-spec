@@ -1,11 +1,11 @@
 ##
 ## ArgoCD Application: Airbyte
 ##
-## Sync wave 0 — устанавливается ПЕРВЫМ, до Insight.
-## Insight Application ждёт, пока эта Application не станет Healthy.
+## Sync wave 0 — installed FIRST, before Insight.
+## The Insight Application waits until this one becomes Healthy.
 ##
-## Values inlined для простоты. Если хотите держать values в git — используйте
-## `source.helm.valueFiles` с путём к файлу в репо.
+## Values are inlined for simplicity. To keep values in Git, use
+## `source.helm.valueFiles` pointing at a file in the repo.
 ##
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -13,11 +13,11 @@ metadata:
   name: airbyte
   namespace: argocd
   annotations:
-    # Чем меньше wave — тем раньше запускается. Insight = wave 1.
+    # Lower wave runs earlier. Insight = wave 1.
     argocd.argoproj.io/sync-wave: "0"
   finalizers:
-    # При удалении Application — каскадно удаляет созданные ресурсы.
-    # Убери, если не хочешь такого поведения.
+    # On Application deletion, cascade-delete the created resources.
+    # Remove this if you don't want that behavior.
     - resources-finalizer.argocd.argoproj.io
 
 spec:
@@ -26,13 +26,13 @@ spec:
   source:
     repoURL: https://airbytehq.github.io/helm-charts
     chart: airbyte
-    # Пин версии — ОБЯЗАТЕЛЬНО для воспроизводимых деплоев.
+    # Version pin — REQUIRED for reproducible deploys.
     targetRevision: 1.5.1
 
     helm:
       releaseName: airbyte
-      # Values inlined. Для больших конфигов — выноси в отдельный repo
-      # и ссылайся через multi-source (sources: [helm_chart, values_repo]).
+      # Values are inlined. For large configs, move them to a separate repo
+      # and reference it with multi-source (sources: [helm_chart, values_repo]).
       values: |
         global:
           edition: community
@@ -71,8 +71,8 @@ spec:
 
   syncPolicy:
     automated:
-      prune: true           # удалять ресурсы, которых нет в Git
-      selfHeal: true        # авто-сихн если в кластере drift
+      prune: true           # delete resources that are no longer in Git
+      selfHeal: true        # auto-sync on drift in the cluster
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
@@ -84,8 +84,8 @@ spec:
         factor: 2
         maxDuration: 3m
 
-  # Airbyte chart ставит много ресурсов, включая тяжёлые CRD от Temporal.
-  # Игнорируем поля, которые patches kubectl/helm.
+  # The Airbyte chart creates many resources, including heavy Temporal CRDs.
+  # Ignore fields that helm/kubectl patches would flip back and forth.
   ignoreDifferences:
     - group: apps
       kind: Deployment

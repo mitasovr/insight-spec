@@ -1,8 +1,8 @@
 ##
 ## ArgoCD Application: Argo Workflows
 ##
-## Sync wave 0 — устанавливается параллельно с Airbyte, до Insight.
-## Insight (wave 1) дожидается, пока обе инфры не станут Healthy.
+## Sync wave 0 — installed in parallel with Airbyte, before Insight.
+## Insight (wave 1) waits until both infra apps become Healthy.
 ##
 apiVersion: argoproj.io/v1alpha1
 kind: Application

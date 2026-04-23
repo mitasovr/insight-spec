@@ -1,14 +1,14 @@
 # Argo Workflows installation for Insight
 
-Argo Workflows — движок для ingestion-pipelines (Airbyte sync → dbt run → enrichment). Ставится **отдельным Helm-релизом** в namespace `argo`.
+Argo Workflows is the engine for ingestion pipelines (Airbyte sync → dbt run → enrichment). It is installed as a **standalone Helm release** in namespace `argo`.
 
-Insight-сервисы создают `CronWorkflow` объекты; Argo controller их исполняет.
+Insight services create `CronWorkflow` objects; the Argo controller executes them.
 
 ## Pinned version
 
 | Component | Version |
 |-----------|---------|
-| Chart     | 0.45.x (pinned in install script) |
+| Chart     | 0.45.x (pinned in the install script) |
 
 ## Install (quickstart)
 
@@ -16,7 +16,7 @@ Insight-сервисы создают `CronWorkflow` объекты; Argo contro
 ./deploy/scripts/install-argo.sh
 ```
 
-Или вручную:
+Or manually:
 ```bash
 helm repo add argo https://argoproj.github.io/argo-helm
 helm upgrade --install argo-workflows argo/argo-workflows \
@@ -28,11 +28,11 @@ kubectl apply -f deploy/argo/rbac.yaml
 
 ## Production overrides
 
-Поверх [`values.yaml`](./values.yaml) — свой `values-prod.yaml`:
-- HA: `controller.replicas: 2`, workflow archive в Postgres
-- `server.sso` с OIDC клиентом
-- Resource limits под размер потока workflow'ов
-- Ограничить `controller.parallelism` если кластер shared
+On top of [`values.yaml`](./values.yaml), provide your own `values-prod.yaml`:
+- HA: `controller.replicas: 2`, workflow archive in Postgres
+- `server.sso` with an OIDC client
+- Resource limits sized for your workflow volume
+- Restrict `controller.parallelism` if the cluster is shared
 
 ```bash
 EXTRA_VALUES_FILE=deploy/argo/values-prod.yaml \
@@ -41,7 +41,7 @@ EXTRA_VALUES_FILE=deploy/argo/values-prod.yaml \
 
 ## WorkflowTemplates
 
-WorkflowTemplates (`airbyte-sync`, `dbt-run`, `ingestion-pipeline`) — это **контент**, а не инфра. Они поставляются umbrella-чартом Insight под флагом `ingestion.templates.enabled: true`. После установки umbrella они появятся в namespace `insight` и их можно ссылать из `CronWorkflow`-ов.
+The WorkflowTemplates (`airbyte-sync`, `dbt-run`, `ingestion-pipeline`) are **content**, not infrastructure. They are shipped by the Insight umbrella chart under the `ingestion.templates.enabled: true` flag. After the umbrella is installed they appear in the `insight` namespace and can be referenced from `CronWorkflow` objects.
 
 ## Verify
 

@@ -1,6 +1,6 @@
 # Patterns to ignore when building packages.
-# NB: не помещай сюда `charts/` — это ломает подтягивание subcharts.
-# Чтобы не коммитить зависимости в Git, используй .gitignore.
+# NB: do NOT put `charts/` here — it breaks subchart resolution.
+# To keep dependency tgz files out of git, use .gitignore instead.
 .DS_Store
 .git/
 .gitignore
@@ -9,6 +9,6 @@
 *.tmproj
 .vscode/
 
-# Локальные заметки
+# Local notes
 *.local
 NOTES.local.md

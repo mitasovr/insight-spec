@@ -1,11 +1,11 @@
 ##
-## Argo Workflows — дополнительный RBAC для Insight.
+## Argo Workflows — additional RBAC for Insight.
 ##
-## argo-workflow-executor — Role, которую получает default ServiceAccount
-## в каждой workflow-namespace. Нужна, чтобы Argo executor мог писать
-## результаты шагов в K8s API.
+## argo-workflow-executor — Role bound to the default ServiceAccount
+## in each workflow namespace. Required so the Argo executor can write
+## step results to the K8s API.
 ##
-## Применяется install-argo.sh после установки чарта.
+## Applied by install-argo.sh after the chart is installed.
 ##
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -37,8 +37,8 @@ roleRef:
   name: argo-workflow-executor
   apiGroup: rbac.authorization.k8s.io
 ---
-# То же самое для namespace 'insight' — там тоже могут исполняться
-# workflow'ы (CronWorkflow'ы умбрелы).
+# Same Role in the 'insight' namespace — workflows (CronWorkflows
+# shipped by the umbrella) can execute there as well.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

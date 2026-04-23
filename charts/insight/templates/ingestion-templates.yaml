@@ -1,15 +1,16 @@
 {{/*
-Argo WorkflowTemplates для ingestion-пайплайнов.
+Argo WorkflowTemplates for ingestion pipelines.
 
-Эти файлы лежат в files/ingestion/*.yaml и эмитятся как есть через
-.Files.Get — без Helm-шаблонизации. Так сделано чтобы не экранировать
-Argo-синтаксис {{inputs.parameters.foo}}, которого в них много.
+These files live in files/ingestion/*.yaml and are emitted verbatim via
+.Files.Get — no Helm templating. That avoids having to escape Argo's
+{{inputs.parameters.foo}} syntax, which appears many times in the script
+blocks of those templates.
 
-Кастомизация URL/хостов — через arguments.parameters при создании
-CronWorkflow, а не через Helm. Дефолты в файлах уже правильные для
-ожидаемого namespace layout (см. ../values.yaml).
+URL/host customization happens via arguments.parameters when submitting
+a CronWorkflow, not via Helm. Defaults in the files already match the
+expected namespace layout (see ../values.yaml).
 
-Контроллер Argo должен следить за этой namespace — см. deploy/argo/values.yaml
+The Argo controller must watch this namespace — see deploy/argo/values.yaml
 workflowNamespaces: [argo, insight].
 */}}
 {{- if .Values.ingestion.templates.enabled }}

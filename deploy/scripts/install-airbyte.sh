@@ -57,13 +57,14 @@ helm upgrade --install "$RELEASE" airbyte/airbyte \
   --wait --timeout 15m
 
 # ─── JWT secret mirror ─────────────────────────────────────────────────
-# Ingestion WorkflowTemplates работают в namespace `insight` и подписывают
-# JWT для Airbyte API. Зеркалим airbyte-auth-secrets из airbyte-ns в
-# insight-ns под ТЕМ ЖЕ именем/ключом (jwt-signature-secret) — это имя
-# и ключ, которые Airbyte-чарт создаёт сам, и которые зашиты в шаблонах.
+# Ingestion WorkflowTemplates run in the `insight` namespace and sign
+# JWTs for the Airbyte API. We mirror airbyte-auth-secrets from the
+# airbyte namespace into the insight namespace under the SAME name/key
+# (jwt-signature-secret) — those are the name and key the Airbyte chart
+# creates and which the workflow templates hardcode.
 #
-# Идемпотентно: пересоздаёт при каждом запуске (секрет может ротироваться
-# между версиями Airbyte).
+# Idempotent: re-created on every run (the secret may rotate between
+# Airbyte versions).
 log "Mirroring Airbyte auth secret to Insight namespace"
 INSIGHT_NS="${INSIGHT_NAMESPACE:-insight}"
 kubectl create namespace "$INSIGHT_NS" --dry-run=client -o yaml | kubectl apply -f -

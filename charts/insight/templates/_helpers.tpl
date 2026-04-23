@@ -2,14 +2,14 @@
 ==============================================================================
  Umbrella helpers
 ==============================================================================
-Центральное место для:
-  - имени релиза/компонентов (DRY)
-  - resolve service-ссылок (internal vs external) через enabled-gate
-  - fail-fast валидаторы для обязательных полей
+Central place for:
+  - release/component names (DRY)
+  - service reference resolution (internal vs external) via enabled-gate
+  - fail-fast validators for required fields
 
-Любой шаблон, которому нужен host/port/URL зависимости — использует helper,
-а не хардкодит имя. Если SRE скажет "переименуйте MariaDB в Galera" —
-правим один файл.
+Any template that needs a dependency host/port/URL uses a helper rather
+than hardcoding the name. If SRE ever decides to rename a component,
+only this file changes.
 ==============================================================================
 */}}
 
@@ -30,9 +30,10 @@ app.kubernetes.io/part-of: insight
 ==============================================================================
  SERVICE RESOLUTION HELPERS
 ==============================================================================
-Контракт: каждый helper отдаёт либо internal DNS (если сабчарт enabled),
-либо значение из external.* (если enabled=false). Fail если external
-не задан в отключённом режиме — ловим косяк до deploy'а.
+Contract: each helper returns either the internal DNS (if the subchart is
+enabled) or the value from external.* (if enabled=false). Fails if external
+is missing while the subchart is disabled — this catches misconfiguration
+at helm template / install time, before anything hits the cluster.
 ==============================================================================
 */}}
 
@@ -49,7 +50,7 @@ app.kubernetes.io/part-of: insight
 {{- if .Values.clickhouse.enabled -}}
 8123
 {{- else -}}
-{{- .Values.clickhouse.external.port | default 8123 -}}
+{{- required "clickhouse.enabled=false requires clickhouse.external.port" .Values.clickhouse.external.port -}}
 {{- end -}}
 {{- end -}}
 
@@ -58,7 +59,7 @@ http://{{ include "insight.clickhouse.host" . }}:{{ include "insight.clickhouse.
 {{- end -}}
 
 {{- define "insight.clickhouse.database" -}}
-{{- .Values.clickhouse.database | default "insight" -}}
+{{- required "clickhouse.database is required" .Values.clickhouse.database -}}
 {{- end -}}
 
 {{/* ---------- MariaDB ---------- */}}
@@ -74,15 +75,15 @@ http://{{ include "insight.clickhouse.host" . }}:{{ include "insight.clickhouse.
 {{- if .Values.mariadb.enabled -}}
 3306
 {{- else -}}
-{{- .Values.mariadb.external.port | default 3306 -}}
+{{- required "mariadb.enabled=false requires mariadb.external.port" .Values.mariadb.external.port -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "insight.mariadb.database" -}}
 {{- if .Values.mariadb.enabled -}}
-{{- .Values.mariadb.auth.database | default "insight" -}}
+{{- required "mariadb.auth.database is required" .Values.mariadb.auth.database -}}
 {{- else -}}
-{{- .Values.mariadb.external.database | default "insight" -}}
+{{- required "mariadb.external.database is required" .Values.mariadb.external.database -}}
 {{- end -}}
 {{- end -}}
 
@@ -99,7 +100,7 @@ http://{{ include "insight.clickhouse.host" . }}:{{ include "insight.clickhouse.
 {{- if .Values.redis.enabled -}}
 6379
 {{- else -}}
-{{- .Values.redis.external.port | default 6379 -}}
+{{- required "redis.enabled=false requires redis.external.port" .Values.redis.external.port -}}
 {{- end -}}
 {{- end -}}
 
@@ -117,28 +118,28 @@ redis://{{ include "insight.redis.host" . }}:{{ include "insight.redis.port" . }
 {{- end -}}
 
 {{/* ---------- App service DNS (always internal, always umbrella-managed) ---------- */}}
-{{- define "insight.apiGateway.host"   -}}{{- printf "%s-api-gateway"           .Release.Name -}}{{- end -}}
-{{- define "insight.analyticsApi.host" -}}{{- printf "%s-analytics-api"         .Release.Name -}}{{- end -}}
-{{- define "insight.identity.host"     -}}{{- printf "%s-identity-resolution"  .Release.Name -}}{{- end -}}
-{{- define "insight.frontend.host"     -}}{{- printf "%s-frontend"              .Release.Name -}}{{- end -}}
+{{- define "insight.apiGateway.host"   -}}{{- printf "%s-api-gateway"          .Release.Name -}}{{- end -}}
+{{- define "insight.analyticsApi.host" -}}{{- printf "%s-analytics-api"        .Release.Name -}}{{- end -}}
+{{- define "insight.identity.host"     -}}{{- printf "%s-identity-resolution" .Release.Name -}}{{- end -}}
+{{- define "insight.frontend.host"     -}}{{- printf "%s-frontend"             .Release.Name -}}{{- end -}}
 
 {{/*
 ==============================================================================
  VALIDATORS
 ==============================================================================
-Fail-fast проверки. Срабатывают при `helm template`/install.
-Вызываются из NOTES.txt (включается в каждый install-run).
+Fail-fast checks that run at helm template / install time.
+Invoked from NOTES.txt so they fire on every install.
 ==============================================================================
 */}}
 {{- define "insight.validate" -}}
-  {{- /* OIDC обязателен, если gateway включён и auth не отключён */ -}}
+  {{- /* OIDC is required when the gateway is on and auth is not disabled */ -}}
   {{- if and .Values.apiGateway.enabled (not .Values.apiGateway.authDisabled) -}}
     {{- if and (not .Values.apiGateway.oidc.existingSecret) (not .Values.apiGateway.oidc.issuer) -}}
       {{- fail "apiGateway.oidc: either existingSecret OR inline issuer+clientId+redirectUri must be set when authDisabled=false" -}}
     {{- end -}}
   {{- end -}}
 
-  {{- /* External service refs проверятся helper'ами, но prompt здесь полезен */ -}}
+  {{- /* External service references also validated via helpers, but making the intent explicit here */ -}}
   {{- if and (not .Values.clickhouse.enabled) (not .Values.clickhouse.external.host) -}}
     {{- fail "clickhouse.enabled=false requires clickhouse.external.host" -}}
   {{- end -}}

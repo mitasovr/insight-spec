@@ -1,67 +1,70 @@
 # GitOps deployment (ArgoCD)
 
-Для enterprise-клиентов, у которых всё уже живёт под ArgoCD: две `Application`-манифеста с sync-wave ordering.
+For enterprise customers whose stack already runs on ArgoCD: three `Application` manifests with sync-wave ordering.
 
-**Модель**: Git — source of truth, ArgoCD следит за этим репо и применяет. Обновление версии = коммит в этот репо.
+**Model**: Git is the source of truth; ArgoCD watches the repo and reconciles. Upgrading a version = a commit to that repo.
 
-## Предпосылки
+## Prerequisites
 
-- ArgoCD установлен в кластере (namespace `argocd`)
-- ArgoCD имеет доступ к:
+- ArgoCD is installed in the cluster (namespace `argocd`)
+- ArgoCD has access to:
   - `https://airbytehq.github.io/helm-charts` (Airbyte chart repo)
-  - `oci://ghcr.io/cyberfabric/charts` (Insight OCI registry) — или git-репо с чартом
-- Создан `AppProject` (или используется `default`)
+  - `https://argoproj.github.io/argo-helm` (Argo Workflows chart repo)
+  - `oci://ghcr.io/cyberfabric/charts` (Insight OCI registry) — or to a Git repo with the chart
+- An `AppProject` is created (or use `default`)
 
-## Файлы
+## Files
 
-| Файл | Описание |
-|------|----------|
-| [`airbyte-application.yaml`](./airbyte-application.yaml) | Application для Airbyte. Sync wave 0. |
-| [`insight-application.yaml`](./insight-application.yaml) | Application для Insight umbrella. Sync wave 1. |
-| [`root-app.yaml`](./root-app.yaml) | App-of-Apps: одна точка входа, управляет двумя выше. |
+| File | Purpose |
+|------|---------|
+| [`airbyte-application.yaml`](./airbyte-application.yaml) | Airbyte Application. Sync wave 0. |
+| [`argo-application.yaml`](./argo-application.yaml) | Argo Workflows Application. Sync wave 0. |
+| [`insight-application.yaml`](./insight-application.yaml) | Insight umbrella Application. Sync wave 1. |
+| [`root-app.yaml`](./root-app.yaml) | App-of-Apps: one entry point that manages the three above. |
 
-## Quickstart: apply двух манифестов
+## Quickstart: apply the three manifests
 
 ```bash
 kubectl apply -f deploy/gitops/airbyte-application.yaml
+kubectl apply -f deploy/gitops/argo-application.yaml
 kubectl apply -f deploy/gitops/insight-application.yaml
 ```
 
-ArgoCD сначала поднимет Airbyte (wave 0), дождётся healthy, потом Insight (wave 1).
+ArgoCD brings up Airbyte and Argo (wave 0), waits for them to become Healthy, then deploys Insight (wave 1).
 
 ## App-of-Apps pattern
 
-Один `root-app.yaml` указывает на директорию `deploy/gitops/` — ArgoCD сам найдёт и создаст все `Application`-ы внутри.
+A single `root-app.yaml` points at the `deploy/gitops/` directory — ArgoCD then discovers all other Application manifests in it and creates them too.
 
 ```bash
 kubectl apply -f deploy/gitops/root-app.yaml
 ```
 
-Плюс: клиент применяет ОДИН манифест, всё остальное подтягивается через Git.
+Benefit: the customer applies ONE manifest and everything else is reconciled from Git.
 
 ## Customization
 
-**Для кастомизации values** клиенту стоит форкнуть репо или завести свой репо с overlays, ссылаться на форк в `source.repoURL`. Не редактируй эти Application-манифесты на месте — потеряешь сдвиг относительно upstream.
+**For values customization**, fork the repo or maintain a separate overlay repo and reference the fork in `source.repoURL`. Do not edit these Application manifests in place — you will drift from upstream.
 
-Альтернатива: использовать `source.helm.valueFiles` с путём к своим values'ам в **другом** Git-репо (можно несколько `sources[]`).
+Alternative: use `source.helm.valueFiles` pointing at your own values in a **different** Git repo (multi-`sources[]` is supported).
 
 ## Upgrade flow
 
 ```bash
-# 1. В своём форке — сменить chart version
+# 1. In your fork — bump the chart version
 sed -i '' 's/targetRevision: 0.1.0/targetRevision: 0.2.0/' insight-application.yaml
 
-# 2. PR → merge → ArgoCD автоматически синкнет
-# (или manual sync через UI / argocd CLI)
+# 2. PR → merge → ArgoCD syncs automatically
+# (or manual sync via UI / argocd CLI)
 ```
 
 ## Rollback
 
 ```bash
-# через ArgoCD CLI
+# Via the ArgoCD CLI
 argocd app rollback insight <REVISION>
 
-# или git revert
+# Or git revert
 git revert <commit>; git push
 ```
 
@@ -71,4 +74,5 @@ git revert <commit>; git push
 argocd app list
 argocd app get insight
 argocd app get airbyte
+argocd app get argo-workflows
 ```

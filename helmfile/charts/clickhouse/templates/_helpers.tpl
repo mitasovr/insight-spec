@@ -1,11 +1,14 @@
 {{/*
-Fullname helper. Ранее StatefulSet и Service использовали просто
-`{{ .Release.Name }}`, что под umbrella chart-ом даёт имя коллизирующее
-с другими ресурсами (frontend и clickhouse оба клались на "insight").
+Fullname helper. Previously the StatefulSet and Service used just
+`{{ .Release.Name }}`, which under an umbrella chart produces a name
+that collides with other resources bound to the same `{release}`
+(for example, the frontend).
 
-Теперь имя = "<release>-clickhouse". Совместимо с umbrella-конвенцией.
+Now the resource name is `<release>-clickhouse`. This matches the
+umbrella convention (`{release}-{component}`) and stays compatible
+with helmfile, where the release name is set explicitly per release.
 
-Если `fullnameOverride` задан — используем его; иначе <release>-<chartname>.
+If `fullnameOverride` is set, it wins; otherwise `<release>-<chart-name>`.
 */}}
 {{- define "clickhouse.fullname" -}}
 {{- if .Values.fullnameOverride -}}

@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 #
-# Install/upgrade Insight umbrella chart.
+# Install/upgrade the Insight umbrella chart.
 #
-# Предполагает, что Airbyte уже стоит (иначе ingestion-сервисы не работают).
-# Запускай ПОСЛЕ install-airbyte.sh или параллельно с ним.
+# Assumes Airbyte and Argo Workflows are already installed (ingestion
+# services will not work otherwise). Run AFTER install-airbyte.sh and
+# install-argo.sh, or alongside them.
 #
 # Environment overrides:
 #   INSIGHT_NAMESPACE  (default: insight)
 #   INSIGHT_RELEASE    (default: insight)
-#   INSIGHT_VERSION    (default: auto — читает Chart.yaml)
-#   INSIGHT_VALUES     дополнительные -f values.yaml (для кастомизации)
-#   CHART_SOURCE       local | oci   (default: local — path к charts/insight)
-#   OCI_REF            OCI-ссылка на чарт (по умолчанию oci://ghcr.io/cyberfabric/charts/insight)
+#   INSIGHT_VERSION    (default: auto — read from Chart.yaml)
+#   INSIGHT_VALUES     extra -f values.yaml (for customization)
+#   CHART_SOURCE       local | oci   (default: local — path to charts/insight)
+#   OCI_REF            OCI reference for the chart (default: oci://ghcr.io/cyberfabric/charts/insight)
 #
 # Usage:
 #   ./deploy/scripts/install-insight.sh
@@ -39,7 +40,7 @@ case "$CHART_SOURCE" in
     [[ -f "$CHART_REF/Chart.yaml" ]] || die "local chart not found: $CHART_REF"
     log "Ensuring subchart dependencies"
     helm dependency update "$CHART_REF" >/dev/null
-    # auto-detect version if not set
+    # Auto-detect version if not set
     VERSION="${INSIGHT_VERSION:-$(grep '^version:' "$CHART_REF/Chart.yaml" | awk '{print $2}')}"
     VERSION_ARG=()
     ;;
@@ -62,9 +63,8 @@ log "Cluster: $(kubectl config current-context)"
 log "Namespace: $NAMESPACE · Release: $RELEASE · Chart: $CHART_REF@$VERSION"
 
 # ─── Check Airbyte is reachable (warning only) ─────────────────────────
-AIRBYTE_SVC="airbyte-airbyte-server-svc.airbyte.svc.cluster.local"
 if ! kubectl -n airbyte get svc airbyte-airbyte-server-svc >/dev/null 2>&1; then
-  log "WARNING: Airbyte not detected in 'airbyte' namespace."
+  log "WARNING: Airbyte not detected in the 'airbyte' namespace."
   log "         Ingestion workflows will fail until Airbyte is installed."
   log "         Run: ./deploy/scripts/install-airbyte.sh"
 fi
