@@ -46,7 +46,12 @@
 
 ## Changelog
 
-- **v1.1** (current): Clarified four points after product-team review.
+- **v1.2** (current): Four changes addressing PR #230 review comments.
+  1. **Rollback is replaced by shadow-deploy.** The plugin system never mutates a live install in place. An upgrade installs the new version alongside the old one, both run for a tenant-configurable trial period against the same inputs, the admin inspects a comparison view, and either PROMOTES the shadow stack (old one is uninstalled; bronze retained) or REJECTS it (shadow stack is uninstalled; tenant returns to the unchanged live stack). Expired trials default to REJECT. There is no distinct rollback operation. New FR `cpt-plugin-fr-shadow-deploy-upgrade`; UC-003 rewritten to this model (addresses `cyberantonz` review comment).
+  2. **Each plugin ships its own isolated transform project.** Plugins MUST NOT use dbt `ref()` across plugin boundaries; downstream plugins discover upstream outputs only through the schema-based input contract, and the runtime injects `sources.yml` at run time. No global dbt DAG spans plugins. New FR `cpt-plugin-fr-isolated-transform-project`. Aligns transformation mechanics with the independent-authorship goal already stated for packaging and versioning.
+  3. **Dependency-graph UI elevated to p1/MUST.** Given non-auto-healing behavior (no legacy mode, no silent rollback) and the shadow-deploy workflow, tenant and instance admins cannot operate the plugin system without a graph view of live + shadow stacks and per-node health. `cpt-plugin-fr-dep-graph-ui` now MUST and p1, matching the acceptance criterion that already assumed it.
+  4. **UC-004 preconditions fixed.** v1.1 refactored silver to schema-based input contracts but missed the UC-004 preconditions paragraph; it still said "silver declares a dependency on the connector plugin." Rewritten to match `cpt-plugin-fr-silver-input-contract`.
+- **v1.1**: Clarified four points after product-team review.
   1. Connectors are responsible not only for fetching data but also for normalizing it into their declared output schema — bronze is what the connector declares, not the vendor's raw payload.
   2. Silver plugins are decoupled from their suppliers by design: a silver plugin declares the input schema it expects plus discovery rules (tags, patterns, or install-time parameters) for locating source tables, and does NOT declare plugin-level dependencies on connectors. Contract matching is schema-based; a new connector that produces the expected shape feeds existing silver without either side knowing about the other. `UNION ALL` across discovered sources is the recommended pattern but not a requirement.
   3. The platform does not validate widget input data on the wire — the host app is a data proxy. Widgets that want input validation ship their own data tests (dbt or equivalent); the plugin runtime executes them before render.
@@ -300,6 +305,24 @@ The plugin system **MUST NOT** allow an instance admin to install, upgrade, reco
 
 **Actors**: `cpt-plugin-actor-tenant-admin`, `cpt-plugin-actor-instance-admin`
 
+#### Shadow-Deploy Upgrade with Trial Period
+
+- [ ] `p1` - **ID**: `cpt-plugin-fr-shadow-deploy-upgrade`
+
+When a tenant admin approves an upgrade plan, the plugin runtime **MUST** install the new plugin version (and any newly-required dependency versions) as a SHADOW STACK alongside the existing install rather than replacing it in place. Both stacks **MUST** run concurrently for a tenant-configurable TRIAL PERIOD (default: 7 days; minimum: one natural sync period or 24 hours, whichever is shorter). During the trial the plugin system **MUST**:
+
+- Keep the existing live stack as the authoritative data producer for user-facing surfaces (widgets, analytics-api) — no user observes the upgrade until it is promoted.
+- Run the shadow stack against the same inputs, writing to its own per-install scopes (`bronze_<shadow_install_id>`, `silver_<shadow_install_id>`, and so on for any capability the plugin introduces).
+- Expose a comparison view in the admin UI with row counts, schema diffs, and — where shapes match between old and new — per-column distributional statistics, so the tenant admin can inspect the change before committing to it.
+
+At the end of the trial the tenant admin either PROMOTES the shadow stack (the runtime uninstalls the old version plus any transitive dependencies that become unused, the shadow stack becomes live, and the old bronze is retained per `cpt-plugin-fr-bronze-preserved`) or REJECTS it (the runtime uninstalls the shadow stack; shadow bronze is discarded because no downstream consumer relied on it; the tenant returns to the unchanged live stack). If the trial period expires without explicit action, the runtime **MUST** default to REJECT — plugins **MUST NOT** silently promote themselves.
+
+The plugin system **MUST NOT** expose a distinct "rollback" operation. Reverting a live plugin to a prior version is accomplished by initiating a new shadow-deploy whose target is the older version (still published in the catalog under `cpt-plugin-fr-semver-contracts`): the same trial, comparison, and promote/reject loop applies.
+
+**Rationale**: In-place upgrades that roll back on failure require the system to snapshot live state and restore it transactionally across connector + silver + widget — expensive to implement, hard to test, and the rollback path is almost never exercised until an incident. Shadow-deploy inverts the risk: the new version proves itself on real data before anything flips for users. It naturally composes with multi-version coexistence (`cpt-plugin-fr-multi-version`) and the bronze-is-sacred guarantee (`cpt-plugin-fr-bronze-preserved`) — during the trial both stacks write to their own scopes without interfering. It also replaces the vague "rollback" concept with a symmetric, well-understood primitive.
+
+**Actors**: `cpt-plugin-actor-tenant-admin`, `cpt-plugin-actor-plugin-runtime`
+
 #### No Legacy Compatibility Mode
 
 - [ ] `p1` - **ID**: `cpt-plugin-fr-no-legacy-mode`
@@ -424,6 +447,18 @@ A silver plugin **MAY** ship data-quality tests against its declared bronze inpu
 
 **Actors**: `cpt-plugin-actor-plugin-author`, `cpt-plugin-actor-plugin-runtime`
 
+#### Each Plugin Ships Its Own Isolated Transform Project
+
+- [ ] `p1` - **ID**: `cpt-plugin-fr-isolated-transform-project`
+
+A plugin that performs transformations (connector normalization, silver transform, or any future transform capability) **MUST** ship its transformation code as a SELF-CONTAINED project scoped to its plugin directory — its own `dbt_project.yml`, its own `packages.yml`, its own macros and models, or the equivalents of another engine. Plugins **MUST NOT** use dbt `ref()` (or the equivalent cross-project reference mechanism of another engine) to reach into another plugin's models. The only supported cross-plugin data flow is via ClickHouse tables materialized by an upstream plugin and referenced by a downstream plugin as dbt `source()` (or equivalent) through the schema-based input contract (`cpt-plugin-fr-silver-input-contract`).
+
+The plugin runtime **MUST** render source definitions (e.g., `sources.yml` for dbt plugins) with the concrete schema names resolved from the discovery rules at run time, injecting them into the plugin's transform project before each run. A plugin **MUST NOT** hardcode schema names that assume a specific upstream plugin install, and the plugin system **MUST NOT** construct a global transform DAG spanning plugins; each install runs its own transform end-to-end, on its own schedule, in isolation.
+
+**Rationale**: A shared transform DAG (such as a single repo-wide dbt project) couples every plugin to every other plugin at compile time — one plugin's rename or type change compiles-fails a completely different plugin owned by a different author. Project-per-plugin isolation is what enables independent authorship, independent versioning, independent release cadence, independent runtime upgrade (including shadow-deploy), and the eventual path to third-party plugins. The cost is losing dbt's ability to order transforms across plugins — but cross-plugin ordering belongs at the system scheduling layer (cron + discovery-based source resolution), not inside the transform engine.
+
+**Actors**: `cpt-plugin-actor-plugin-author`, `cpt-plugin-actor-plugin-runtime`
+
 ### 5.5 Widget Capability
 
 #### Widget Ships as a Microfrontend Module
@@ -524,11 +559,11 @@ Every installed plugin **MUST** report its operational status to the plugin runt
 
 #### Dependency Graph Surfaced to Admins
 
-- [ ] `p2` - **ID**: `cpt-plugin-fr-dep-graph-ui`
+- [ ] `p1` - **ID**: `cpt-plugin-fr-dep-graph-ui`
 
-Instance admins **SHOULD** be able to view the dependency graph across all installed plugins with per-node health state (healthy, degraded, broken, upgrade available). Tenant admins **SHOULD** see the subset of the graph relevant to their tenant.
+Instance admins **MUST** be able to view the dependency graph across all installed plugins with per-node health state (healthy, degraded, broken, upgrade available, in-shadow-trial). Tenant admins **MUST** see the subset of the graph relevant to their tenant, including any shadow-deploy trials currently in flight.
 
-**Rationale**: Plugin ecosystems grow dense fast. A visual graph is the only scalable way to find "what is broken and what does it block" when something fails.
+**Rationale**: Plugin ecosystems grow dense fast, and the system is explicitly non-auto-healing (no legacy mode, no silent rollback) — failures and conflicts must be investigated by a human. A visual graph is the only scalable way to find "what is broken and what does it block". For tenant admins during a shadow-deploy trial, seeing the live stack and the shadow stack side-by-side is part of the core upgrade workflow (`cpt-plugin-fr-shadow-deploy-upgrade`), not a nice-to-have.
 
 **Actors**: `cpt-plugin-actor-instance-admin`, `cpt-plugin-actor-tenant-admin`
 
@@ -687,17 +722,22 @@ An instance **MUST** support at least 50 plugin installs per tenant and at least
 **Main Flow**:
 
 1. Admin selects Upgrade on the plugin's tile
-2. Resolver computes the transitive upgrade plan (this plugin + dependencies)
-3. UI shows the plan; admin sees exactly which other plugins will upgrade and to what versions
-4. Admin approves; plugin runtime performs each upgrade in dependency order, preserving bronze data and re-deriving silver and widget state
-5. Inventory is updated; admin sees all participating plugins at their new versions and status reports green
+2. Resolver computes the transitive **shadow-deploy** plan (this plugin + dependencies) — the new versions are installed ALONGSIDE the existing ones, not in place of them (per `cpt-plugin-fr-shadow-deploy-upgrade`)
+3. UI shows the plan — which plugins will install as shadow versions, the tenant-configurable trial window (default 7 days), and the side-by-side comparison surfaces that will become available once data starts flowing
+4. Admin approves; plugin runtime installs the shadow stack in parallel with the existing live stack; both stacks write to their own per-install scopes and run on their own schedules
+5. During the trial window, the live stack continues to feed user-facing surfaces; the shadow stack processes the same inputs into its own scopes; the admin UI exposes a comparison view (row counts, schema diffs, per-column statistics where shapes match)
+6. The admin PROMOTES the shadow stack (explicitly, or automatically after the trial window IF the tenant opted in to auto-promote) — the runtime uninstalls the old version and any transitive dependencies that become unused, the shadow stack becomes live, and old bronze is retained per `cpt-plugin-fr-bronze-preserved`
+7. Inventory is updated; the graph view reports green on the promoted stack
 
-**Postconditions**: Upgraded plugins are running; bronze data is preserved across the transition.
+**Postconditions**: On promote — the new version is live; old bronze is retained. On reject — no change to the tenant's plugin set; shadow scopes are discarded (they have no downstream consumers).
 
 **Alternative Flows**:
 
-- **Admin rejects plan**: No changes applied. Plugin remains at the prior version. The "upgrade available" indicator persists.
-- **One plugin in the chain fails mid-upgrade**: The runtime pauses the chain, reports the failure, and requires admin intervention (retry or rollback).
+- **Admin rejects at step 3**: No changes applied. Plugin remains at the prior version; the "upgrade available" indicator persists.
+- **One plugin in the shadow stack fails to install**: The runtime reports the failure; **the live stack is untouched**. Admin can retry, fix config, or abandon the shadow-deploy without affecting running data.
+- **Admin REJECTS at step 6**: Runtime uninstalls the shadow stack and its unused transitive dependencies. The tenant returns to the unchanged live stack.
+- **Trial window expires without explicit action**: Default policy is REJECT (runtime uninstalls the shadow stack). No plugin ever silently promotes itself.
+- **Reverting a previously-promoted upgrade**: This is not a distinct "rollback" operation — the admin simply starts a new shadow-deploy targeting the prior version (which remains available in the catalog), and follows the same flow.
 
 ### UC-004 Silver Plugin Consumes Bronze from a Connector Plugin
 
@@ -705,7 +745,7 @@ An instance **MUST** support at least 50 plugin installs per tenant and at least
 
 **Actor**: `cpt-plugin-actor-plugin-runtime`
 
-**Preconditions**: A connector plugin and a silver plugin are both installed; the silver plugin declares a dependency on the connector plugin's output bronze tables at a specific major version.
+**Preconditions**: A connector plugin and a silver plugin are both installed in the same tenant; the connector's output bronze schema matches the silver plugin's declared input contract (per `cpt-plugin-fr-silver-input-contract`). There is **no** plugin-level dependency declared between them — the match is schema-based, so the same silver plugin accepts any connector whose output shape satisfies its input contract.
 
 **Main Flow**:
 
@@ -731,6 +771,10 @@ An instance **MUST** support at least 50 plugin installs per tenant and at least
 - [ ] Two versions of the same plugin can coexist in one tenant; uninstalling the older version does not affect the newer version's bronze data
 - [ ] Uninstalling a plugin preserves its bronze data unless the admin explicitly opts in to deletion
 - [ ] Upgrading a plugin to a new major version requires explicit admin approval of the full transitive upgrade plan
+- [ ] Upgrading a plugin installs the new version as a shadow stack alongside the live version; both run concurrently against the same inputs; the live stack continues to feed widgets / analytics-api until the tenant admin promotes the shadow stack; rejecting the shadow stack returns the tenant to the unchanged live stack with no user-visible interruption
+- [ ] A shadow-deploy trial window expires without admin action defaults to REJECT; the shadow stack is uninstalled and no auto-promotion occurs
+- [ ] Reverting a previously-promoted upgrade is performed by initiating a new shadow-deploy back to the prior version — there is no distinct "rollback" API
+- [ ] Each plugin's transform code (dbt project or equivalent) is self-contained in the plugin directory; attempting to use dbt `ref()` to reach across plugins fails at compile time; a downstream plugin discovers upstream outputs only through the schema-based input contract with runtime-injected `sources.yml`
 - [ ] A connector plugin using the Airbyte source protocol can be installed without the plugin author reimplementing destination logic
 - [ ] A widget plugin loads in the host frontend at runtime without a product rebuild
 - [ ] When a silver plugin's data-quality tests fail, the transform does not run and an admin-visible failure is recorded
@@ -782,7 +826,7 @@ An instance **MUST** support at least 50 plugin installs per tenant and at least
 | Per-tenant isolation mechanism — single table with `tenant_id` column and RLS policies, vs schema-per-install — which better suits on-prem distribution; current platform uses the former at the table level | Data tech lead | DESIGN |
 | Installed-inventory data model — exact tables, status state machine, audit log shape, relationship between plugin install and its per-install bronze scope | Backend tech lead | DESIGN |
 | Integration testing strategy — how does a plugin author test their plugin against a real customer data shape when the customer's source system is behind a firewall that Insight cannot reach; options include recorded/anonymized request traces shipped to the author, an opt-in customer-side trace-collection service operated by the Insight team, mock servers per connector type, or a combination | Plugin Author lead + Customer Success | DESIGN + customer-engagement policy; track separately from the data-model DESIGN |
-| Plugin-authoring SDK / CLI — `insight-plugin init|validate|test|package|publish` — is it v1 ("can't ship without this") or v2 ("docs + reference plugins first, CLI when patterns stabilize"); the intent is the latter, but the threshold at which the CLI becomes a necessity should be articulated | Plugin Author lead | v2 planning; revisit after first three external plugins |
+| Plugin-authoring SDK / CLI — `insight-plugin init\|validate\|test\|package\|publish` — is it v1 ("can't ship without this") or v2 ("docs + reference plugins first, CLI when patterns stabilize"); the intent is the latter, but the threshold at which the CLI becomes a necessity should be articulated | Plugin Author lead | v2 planning; revisit after first three external plugins |
 | Widget data-contract expressiveness — is "table schema with columns + config JSON schema" sufficient for the interesting widget cases, or does it need streaming, multi-query, or cross-entity access; depends on dashboard-configurator direction | Frontend tech lead | DESIGN, after first 3 widget plugins |
 | Catalog governance — who approves a third-party plugin's inclusion in the central catalog, what compatibility tests run, how unmaintained plugins are retired; policy, not technical | Insight Product Team | Policy doc, before third-party publish path opens |
 | Cross-tenant plugin sharing — an instance admin shipping a plugin-install across all tenants in one step (for a customer with many tenants in one instance); whether this is a v1 convenience or belongs in v2 | Insight Product Team | v2 planning |
