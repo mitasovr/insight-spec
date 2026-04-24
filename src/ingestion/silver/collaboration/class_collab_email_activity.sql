@@ -4,6 +4,7 @@
     unique_key='unique_key',
     incremental_strategy='append',
     order_by=['unique_key'],
+    settings={'allow_nullable_key': 1},
     schema='silver',
     tags=['silver']
 ) }}
