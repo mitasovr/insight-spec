@@ -5,8 +5,8 @@
 -- 29 objects: 1 MergeTree table + 28 views
 -- Dependencies: bronze_bamboohr, bronze_jira, bronze_m365, bronze_zoom,
 --               bronze_bitbucket_cloud, bronze_cursor, bronze_slack,
---               silver.class_comms_events, silver.class_focus_metrics,
---               silver.class_collab_*
+--               silver.class_focus_metrics, silver.class_collab_*,
+--               staging.m365__collab_email_activity
 --
 -- Usage: clickhouse-client --multiquery < 20260422000000_gold-views.sql
 
@@ -180,15 +180,15 @@ AS SELECT
 FROM
 (
     SELECT
-        lower(user_email) AS person_id,
-        toDate(activity_date) AS metric_date,
-        toFloat64(emails_sent) AS emails_sent,
+        lower(person_key) AS person_id,
+        date AS metric_date,
+        toFloat64(sent_count) AS emails_sent,
         toFloat64(0) AS zoom_calls,
         toFloat64(0) AS meeting_hours,
         toFloat64(0) AS teams_messages,
         toFloat64(0) AS teams_meetings,
         toFloat64(0) AS files_shared
-    FROM silver.class_comms_events
+    FROM staging.m365__collab_email_activity
     UNION ALL
     SELECT
         lower(p.email) AS person_id,
@@ -255,12 +255,12 @@ CREATE VIEW insight.email_daily
     `source` String
 )
 AS SELECT
-    lower(user_email) AS person_id,
-    activity_date AS metric_date,
-    lower(user_email) AS user_email,
-    emails_sent,
-    source
-FROM silver.class_comms_events
+    lower(person_key) AS person_id,
+    date AS metric_date,
+    lower(person_key) AS user_email,
+    sent_count AS emails_sent,
+    data_source AS source
+FROM staging.m365__collab_email_activity
 ;
 
 -- =====================================================================
