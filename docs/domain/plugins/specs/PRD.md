@@ -46,7 +46,12 @@
 
 ## Changelog
 
-- **v1.0** (current): Initial PRD. Establishes a unified plugin model with composable capabilities (`connector`, `silver`, `widget`), tenant-scoped installation, explicit admin-driven dependency resolution, and bronze-as-sacred data policy. Defers manifest schema, native-protocol details, and authoring SDK to DESIGN/ADR and v2.
+- **v1.1** (current): Clarified four points after product-team review.
+  1. Connectors are responsible not only for fetching data but also for normalizing it into their declared output schema — bronze is what the connector declares, not the vendor's raw payload.
+  2. Silver plugins are decoupled from their suppliers by design: a silver plugin declares the input schema it expects plus discovery rules (tags, patterns, or install-time parameters) for locating source tables, and does NOT declare plugin-level dependencies on connectors. Contract matching is schema-based; a new connector that produces the expected shape feeds existing silver without either side knowing about the other. `UNION ALL` across discovered sources is the recommended pattern but not a requirement.
+  3. The platform does not validate widget input data on the wire — the host app is a data proxy. Widgets that want input validation ship their own data tests (dbt or equivalent); the plugin runtime executes them before render.
+  4. Tenant upgrade sovereignty is explicit: the instance admin can set policy (catalog allowlists, block lists, force-uninstall a broken plugin) but **cannot** install or upgrade plugins for a tenant. Upgrade decisions stay with the tenant admin so that a bad upgrade is caught by the party responsible for the data.
+- **v1.0**: Initial PRD. Established a unified plugin model with composable capabilities (`connector`, `silver`, `widget`), tenant-scoped installation, explicit admin-driven dependency resolution, and bronze-as-sacred data policy. Deferred manifest schema, native-protocol details, and authoring SDK to DESIGN/ADR and v2.
 
 ## 1. Overview
 
@@ -54,7 +59,7 @@
 
 The Plugin System is the extension mechanism of the Insight platform. It enables first-party teams, enterprise customers, and third-party authors to add new data sources, transformations, and visualizations to a running Insight instance without rebuilding the product and without coordinating a release cycle with the vendor.
 
-Every plugin is a self-contained artifact published to an OCI registry. A tenant admin installs it through the product UI, the instance runtime resolves its dependencies, and its behavior is bounded by well-defined capability contracts: `connector` (writes bronze data from an external source), `silver` (normalizes bronze into cross-source semantic tables), and `widget` (renders part of the dashboard UI). A single plugin may declare any combination of these three capabilities.
+Every plugin is a self-contained artifact published to an OCI registry. A tenant admin installs it through the product UI, the instance runtime resolves its dependencies, and its behavior is bounded by well-defined capability contracts: `connector` (fetches from a source system and writes out a declared, normalized schema — its bronze), `silver` (discovers bronze tables matching a declared input contract and produces cross-source silver tables), and `widget` (renders part of the dashboard UI). A single plugin may declare any combination of these three capabilities.
 
 ### 1.2 Background / Problem Statement
 
@@ -111,10 +116,10 @@ A plugin system decouples the vendor's release cadence from the customer's need 
 | Central catalog | The Insight-operated registry of curated plugins, serving metadata (identity, versions, compatibility, description) that the instance UI uses to populate the marketplace. A plugin can also be installed by direct URL without appearing in the catalog. |
 | Plugin install | A record in an Insight instance's database that says "tenant T has plugin P at version X installed and enabled (or disabled)." The installed image + manifest is cached locally; its reconciliation into runtime resources is performed by the plugin runtime. |
 | Plugin runtime | The subsystem inside the Insight instance that reconciles installed plugins into runtime state — fetches images, runs migrations, schedules connectors, applies silver transforms, registers widgets, reports health. |
-| Connector capability | A plugin capability that fetches data from an external system and writes it to a per-install bronze scope in the data store. The execution protocol may be Airbyte, a future native Insight protocol, or any other protocol the author wants, as long as the plugin is a container that produces the declared bronze output. |
-| Silver capability | A plugin capability that transforms bronze tables (possibly from multiple connectors) into silver tables with a unified cross-source schema. Execution engine is author's choice — dbt is the reference, but any container that reads declared inputs and writes declared outputs is allowed. |
-| Widget capability | A plugin capability that provides a runtime-loaded frontend component (microfrontend) for the dashboard surface. Widgets declare their data contract as a table schema; the host application fetches data and passes it in via a stable interface. |
-| Bronze data | Raw source data preserved verbatim from the external system. Treated as sacred — never deleted or transformed in place by the plugin system; retained so silver and gold layers can always be rebuilt by re-running downstream plugins. |
+| Connector capability | A plugin capability that fetches data from an external system, normalizes it into its declared output schema, and writes it to the connector's per-install bronze scope. Normalization is the connector's responsibility — a downstream silver plugin expects the connector to have already shaped the data, not raw vendor payloads. The execution protocol may be Airbyte, a future native Insight protocol, or any other protocol the author wants, as long as the running container produces the declared bronze output. |
+| Silver capability | A plugin capability that discovers bronze tables matching a declared input contract (schema + discovery rules — tags, name patterns, or install-time parameters) and produces silver tables with a unified cross-source schema. Silver plugins are decoupled from specific connectors by design: they match on the input contract, not on a connector's plugin identity. The recommended default is a `UNION ALL` across discovered sources followed by incremental consolidation, but plugins MAY skip that step and emit derived tables directly. Execution engine is author's choice — dbt is the reference. |
+| Widget capability | A plugin capability that provides a runtime-loaded frontend component (microfrontend) for the dashboard surface. A widget declares the data shape it expects; the host application fetches data by reference and passes it to the widget through a stable interface **without validating its shape or content**. Widgets that want input validation ship their own data tests (dbt or equivalent) and the plugin runtime executes them before rendering. |
+| Bronze data | The data a connector plugin writes to its per-install scope in the connector's declared output schema (not the vendor's raw payload — the connector is responsible for normalizing into its declared shape). Treated as sacred — never deleted or transformed in place by the plugin system; retained so silver and gold layers can always be rebuilt by re-running downstream plugins. |
 | Dependency resolution | The admin-API-driven process of determining, for a requested install or upgrade, what other plugin versions must coexist. Resolution is explicit and admin-approved; there is no auto-upgrade, auto-resolve, or "legacy compatibility" mode. |
 | Plugin capability contract | The set of declared inputs (tables, config, secrets) and outputs (tables, widget interface) a capability exposes. Consumers (other plugins, the host app) rely on this contract; authors may add non-breaking fields within a major version. |
 
@@ -134,9 +139,9 @@ A plugin system decouples the vendor's release cadence from the customer's need 
 
 **ID**: `cpt-plugin-actor-instance-admin`
 
-**Role**: Operates an Insight instance. Controls which plugins the instance's tenants may install (through a mirror of the central catalog, an allowlist, or both), approves dependency resolutions, and intervenes when a plugin misbehaves. Owns the instance's overall plugin inventory and the external secret store configuration.
+**Role**: Operates an Insight instance. Holds an **oversight** role over the plugin surface — not a gatekeeping one. Instance admins **can** (when they choose to) set catalog allowlists/blocklists, force-uninstall a broken or unsafe plugin, and restrict which plugins their tenants may install; this is optional, not required, and the default instance policy allows tenants to self-serve. Instance admins **cannot** install, upgrade, or reconfigure plugins on a tenant's behalf — every change that touches tenant data is initiated by the tenant admin so that the party responsible for the data is the one who approves each change. Owns the instance's overall plugin inventory visibility and the external secret store configuration.
 
-**Needs**: Visibility into every installed plugin across tenants with health and version; the ability to block, force-uninstall, or pin versions; a dependency graph view showing conflicts and reachability; an audit log of who installed or upgraded what.
+**Needs**: Visibility into every installed plugin across tenants with health and version; the ability to block or force-uninstall a specific plugin when safety requires; a dependency graph view showing conflicts and reachability; an audit log of who installed or upgraded what.
 
 #### Tenant Admin
 
@@ -279,11 +284,21 @@ The plugin system **MUST** support installing two or more versions of the same p
 
 - [ ] `p1` - **ID**: `cpt-plugin-fr-explicit-resolution`
 
-When a tenant admin requests an install or upgrade, the admin API **MUST** compute the full set of plugins (and versions) that would need to be added or upgraded to satisfy the request and **MUST** present that set to the admin for approval before any change is applied. The admin **MUST** be able to reject the resolution. The plugin system **MUST NOT** automatically upgrade, downgrade, or uninstall plugins on the admin's behalf.
+When a tenant admin requests an install or upgrade, the admin API **MUST** compute the full set of plugins (and versions) that would need to be added or upgraded to satisfy the request and **MUST** present that set to the tenant admin for approval before any change is applied. The tenant admin **MUST** be able to reject the resolution. The plugin system **MUST NOT** automatically upgrade, downgrade, or uninstall plugins on anyone's behalf.
 
-**Rationale**: Plugins may touch tenant-critical data. Surprise upgrades are unacceptable. Explicit resolution gives the admin a decision point and an audit trail; the default behavior of doing nothing unless approved is the safe default.
+**Rationale**: Plugins may touch tenant-critical data. Surprise upgrades are unacceptable. Explicit resolution gives the tenant admin a decision point and an audit trail; the default behavior of doing nothing unless approved is the safe default.
 
 **Actors**: `cpt-plugin-actor-tenant-admin`, `cpt-plugin-actor-admin-api`
+
+#### Tenant Upgrade Sovereignty
+
+- [ ] `p1` - **ID**: `cpt-plugin-fr-tenant-sovereignty`
+
+The plugin system **MUST NOT** allow an instance admin to install, upgrade, reconfigure, or enable a plugin on behalf of a tenant. Instance admins retain oversight powers — catalog allowlists, force-uninstall, and blocking specific plugins — but every change that adds to or advances a tenant's plugin set **MUST** be initiated and approved by a tenant admin. Emergency force-uninstall by an instance admin **MUST** be recorded in the audit log with the reason and **MUST** notify the tenant admin.
+
+**Rationale**: If a plugin upgrade corrupts tenant data, the party who approved the upgrade must be the one responsible for the data — otherwise accountability breaks down. The instance admin's job is to protect the instance (block dangerous plugins, contain outages); it is not to push changes into tenants who have not asked for them.
+
+**Actors**: `cpt-plugin-actor-tenant-admin`, `cpt-plugin-actor-instance-admin`
 
 #### No Legacy Compatibility Mode
 
@@ -317,13 +332,23 @@ The plugin system **SHOULD** identify plugin installs that were pulled in as tra
 
 ### 5.3 Connector Capability
 
-#### Connector Emits Bronze to a Per-Install Scope
+#### Connector Normalizes Source Data to a Declared Output Schema
+
+- [ ] `p1` - **ID**: `cpt-plugin-fr-connector-output-contract`
+
+A plugin that declares the `connector` capability **MUST** declare its output as a schema (tables + columns + types) in its manifest and **MUST** guarantee that every row it writes to bronze conforms to that declared schema. The connector **MUST** perform whatever reshaping is required to normalize raw source payloads into the declared shape (pivoting, renaming, type coercion, de-nesting, timestamp normalization, etc.) — it is the connector's responsibility, not the downstream silver plugin's, to absorb the vendor's data quirks.
+
+**Rationale**: Decoupling silver from vendor idiosyncrasies is the architectural intent. If every silver plugin had to parse every connector's raw output, adding a new connector would require changing every silver plugin that consumes it. Pushing normalization into the connector means silver plugins match on shape alone and a new source becomes a drop-in.
+
+**Actors**: `cpt-plugin-actor-plugin-author`, `cpt-plugin-actor-plugin-runtime`
+
+#### Connector Writes to a Per-Install Bronze Scope
 
 - [ ] `p1` - **ID**: `cpt-plugin-fr-connector-bronze-scope`
 
-A plugin that declares the `connector` capability **MUST** emit its output into a per-install bronze scope in the data store, isolated from every other connector install (including other installs of the same plugin for the same tenant at different versions). Tables, schemas, and any other data-store namespace the connector uses **MUST** be derivable from the `(tenant_id, plugin_id, plugin_version, install_id)` tuple so scopes do not collide.
+A connector capability **MUST** write into a per-install bronze scope in the data store, isolated from every other connector install (including other installs of the same plugin for the same tenant at different versions). Tables, schemas, and any other data-store namespace the connector uses **MUST** be derivable from the `(tenant_id, plugin_id, plugin_version, install_id)` tuple so scopes do not collide.
 
-**Rationale**: Bronze data is the durable record of what the source system returned. Isolating scopes by install means uninstalls are safe (delete the scope), migrations between versions are safe (write to a new scope, validate, then switch), and multi-version coexistence works.
+**Rationale**: Bronze is the durable record of what the connector produced after normalization. Isolating scopes by install means uninstalls are safe (delete the scope), migrations between versions are safe (write to a new scope, validate, then switch), and multi-version coexistence works.
 
 **Actors**: `cpt-plugin-actor-plugin-runtime`
 
@@ -359,13 +384,23 @@ For connector plugins that use the Airbyte source protocol, the plugin system **
 
 ### 5.4 Silver Capability
 
-#### Silver Transforms Bronze Into Unified Outputs
+#### Silver Declares an Input Contract, Not Supplier Plugins
+
+- [ ] `p1` - **ID**: `cpt-plugin-fr-silver-input-contract`
+
+A plugin that declares the `silver` capability **MUST** declare its inputs as a contract consisting of (a) the expected schema (tables, columns, types) of each input and (b) discovery rules (tags, name patterns, or install-time parameters) by which the plugin runtime locates source tables in the data store. The silver plugin **MUST NOT** declare plugin-level dependencies on specific connector plugins for its data sources — compatibility is schema-based, not plugin-identity-based.
+
+**Rationale**: Decoupling silver from specific connectors is the point of the capability boundary. A tenant that adds a third connector (say `git-bitbucket`) producing the expected shape should feed the existing `silver-git` plugin without `silver-git` being aware of it. A connector that upgrades to a new major version without changing the output schema should not trigger a silver-plugin upgrade. Schema-level contracts give this flexibility; plugin-ID dependencies would not.
+
+**Actors**: `cpt-plugin-actor-plugin-author`, `cpt-plugin-actor-plugin-runtime`
+
+#### Silver Produces Declared Output Tables
 
 - [ ] `p1` - **ID**: `cpt-plugin-fr-silver-transform`
 
-A plugin that declares the `silver` capability **MUST** transform one or more bronze inputs (from connector plugins it depends on) into silver output tables with declared schemas. The plugin **MUST** declare its input bronze tables (as `(plugin_id, plugin_version, table_name)` references) and its output silver tables (schema + columns) in its manifest.
+A silver-capability plugin **MUST** declare its output silver tables (schema + columns + types) in its manifest and **MUST** produce them in a per-install silver scope. The recommended default processing pattern is `UNION ALL` across all discovered input sources with incremental consolidation, but the plugin **MAY** skip that step and emit pre-aggregated or derived tables directly; the choice is internal to the plugin.
 
-**Rationale**: A silver plugin is in essence a function `bronze* → silver*`. Declaring both sides explicitly is what allows the dependency resolver to verify compatibility and the runtime to detect contract violations.
+**Rationale**: A silver plugin is in essence a function `(discovered bronze) → silver*`. Declaring the output explicitly is what allows widgets and other downstream consumers to rely on it. Leaving the internal pipeline shape to the plugin author lets complex cases (algorithmic enrichment, cross-entity joins, ML scoring) fit the same contract as simple union-based silvers.
 
 **Actors**: `cpt-plugin-actor-plugin-author`, `cpt-plugin-actor-plugin-runtime`
 
@@ -405,9 +440,19 @@ A plugin that declares the `widget` capability **MUST** ship a microfrontend mod
 
 - [ ] `p1` - **ID**: `cpt-plugin-fr-widget-data-contract`
 
-A widget capability **MUST** declare its expected input data as a table schema (column names, types, nullability) and optional config (JSON schema). The host application **MUST** resolve the data based on the dashboard's widget-instance configuration, fetch it, and pass it to the widget through a stable interface. The widget **MUST NOT** query the data store directly.
+A widget capability **MUST** declare its expected input data as a table schema (column names, types, nullability) and optional config (JSON schema). The host application **MUST** resolve the data based on the dashboard's widget-instance configuration, fetch it, and pass it to the widget through a stable interface. The widget **MUST NOT** query the data store directly. The host **MUST** act as a pass-through — it **MUST NOT** validate that the delivered data matches the widget's declared schema.
 
-**Rationale**: Centralizing data fetching in the host prevents widget plugins from leaking data between tenants, bypassing RLS, or holding long-lived DB credentials. The widget becomes a pure rendering function over (data, config), which is the minimum-privilege model.
+**Rationale**: Centralizing data fetching in the host prevents widget plugins from leaking data between tenants, bypassing isolation, or holding long-lived DB credentials. Keeping the host a pure proxy (no semantic validation) avoids accidentally coupling the host to every widget's evolving schema; validation, when needed, belongs to the party that cares — the widget plugin itself (see `cpt-plugin-fr-widget-input-tests`).
+
+**Actors**: `cpt-plugin-actor-plugin-author`, `cpt-plugin-actor-plugin-runtime`
+
+#### Widget Input Validation Is Opt-In via Plugin-Shipped Tests
+
+- [ ] `p1` - **ID**: `cpt-plugin-fr-widget-input-tests`
+
+A widget-capability plugin **MAY** ship data-quality tests (dbt or an equivalent mechanism declared in the manifest) against its declared input. When such tests are present, the plugin runtime **MUST** execute them before rendering the widget and **MUST** surface failures to the admin. When such tests are not present, the host renders whatever it fetched without checking it.
+
+**Rationale**: Data-shape mismatches break widgets silently today. Letting widget authors declare and enforce their own expectations shifts responsibility to the party who feels the pain. Keeping tests opt-in avoids forcing every trivial widget to invent a test suite.
 
 **Actors**: `cpt-plugin-actor-plugin-author`, `cpt-plugin-actor-plugin-runtime`
 
@@ -680,7 +725,8 @@ An instance **MUST** support at least 50 plugin installs per tenant and at least
 ## 9. Acceptance Criteria
 
 - [ ] A plugin with `connector` capability can be published to ghcr.io and installed in an Insight instance through the marketplace UI, end to end, with no code changes to the Insight product
-- [ ] A plugin with `silver` capability that depends on a connector plugin cannot be installed if its declared dependency is unmet; the admin sees the unmet dependency in the resolver output
+- [ ] A silver plugin whose input discovery yields zero matching bronze tables in the tenant is installable but surfaces a "no sources discovered" warning to the admin; installing a second connector that produces the expected shape makes the silver plugin's transform run without modifying the silver plugin
+- [ ] An instance admin cannot install or upgrade a plugin on a tenant's behalf through the admin API; force-uninstall is allowed and is audit-logged with the reason
 - [ ] A plugin that combines `connector` + `silver` + `widget` in a single manifest installs as one artifact and each capability becomes operational independently
 - [ ] Two versions of the same plugin can coexist in one tenant; uninstalling the older version does not affect the newer version's bronze data
 - [ ] Uninstalling a plugin preserves its bronze data unless the admin explicitly opts in to deletion
