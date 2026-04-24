@@ -22,6 +22,8 @@ kubectl exec -n data deploy/clickhouse -- clickhouse-client --password "$CH_PASS
   --query "CREATE DATABASE IF NOT EXISTS staging" 2>/dev/null
 kubectl exec -n data deploy/clickhouse -- clickhouse-client --password "$CH_PASS" \
   --query "CREATE DATABASE IF NOT EXISTS silver" 2>/dev/null
+kubectl exec -n data deploy/clickhouse -- clickhouse-client --password "$CH_PASS" \
+  --query "CREATE DATABASE IF NOT EXISTS insight" 2>/dev/null
 
 echo "=== Creating bronze placeholders for missing connectors ==="
 "$SCRIPT_DIR/create-bronze-placeholders.sh"

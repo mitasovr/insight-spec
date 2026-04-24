@@ -158,11 +158,13 @@ def discover_secrets():
                 raw = base64.b64decode(v).decode()
             except Exception:
                 raw = v
-            # Parse JSON values stored as strings in K8s Secrets
-            # (arrays, objects, booleans, numbers)
+            # Parse JSON values stored as strings in K8s Secrets —
+            # only promote arrays and objects. Airbyte source specs typically
+            # declare scalars (port, account_id, start_date, ...) as strings,
+            # so coercing "8080" → 8080 here breaks source validation.
             try:
                 parsed = json.loads(raw)
-                if isinstance(parsed, (list, dict, bool, int, float)):
+                if isinstance(parsed, (list, dict)):
                     data[k] = parsed
                 else:
                     data[k] = raw
@@ -276,7 +278,18 @@ connector_instances = []
 for connector_name, matching_secrets in secrets_by_connector.items():
     for secret in matching_secrets:
         sid = secret["source_id"]
-        config = dict(secret["data"])
+        # Parse JSON values from secret (K8s secrets are always strings,
+        # but Airbyte expects arrays/objects for some fields).
+        config = {}
+        for k, v in secret["data"].items():
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, (list, dict)):
+                    config[k] = parsed
+                else:
+                    config[k] = v
+            except (json.JSONDecodeError, TypeError):
+                config[k] = v
         config["insight_tenant_id"] = tenant_id
         config["insight_source_id"] = sid
         connector_instances.append((connector_name, sid, config))
@@ -404,13 +417,11 @@ for connector_name, source_id_label, config in connector_instances:
                 stream_name = stream_def.get("name", "")
                 supported = stream_def.get("supportedSyncModes", ["full_refresh"])
                 sync_mode = "incremental" if "incremental" in supported else "full_refresh"
-                # full_refresh streams use "overwrite" (not "append") so repeated
-                # full-refresh syncs replace the Bronze table instead of stacking
-                # duplicate snapshots. This only applies to **new** connections
-                # created by this script: existing connections in state.yaml keep
-                # whatever destinationSyncMode they already have -- to migrate
-                # them, delete the connection and re-run `connect.sh --all`.
-                dest_sync_mode = "append_dedup" if sync_mode == "incremental" else "overwrite"
+                # Bronze is always plain append; dedup happens in silver via unique_key.
+                # Destination-side dedup (append_dedup) buffers all records in memory
+                # until stream COMPLETE — OOMs on large streams and loses all data
+                # on mid-stream pod death. Overwrite has the same problem on retries.
+                dest_sync_mode = "append"
                 stream_config = {
                     "syncMode": sync_mode,
                     "destinationSyncMode": dest_sync_mode,

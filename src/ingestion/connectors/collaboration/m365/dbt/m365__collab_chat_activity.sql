@@ -1,6 +1,7 @@
 {{ config(
     materialized='incremental',
     unique_key='unique_key',
+    order_by=['unique_key'],
     schema='staging',
     tags=['m365', 'silver:class_collab_chat_activity']
 ) }}
@@ -25,7 +26,7 @@ SELECT
     reportPeriod AS report_period,
     now() AS collected_at,
     'insight_m365' AS data_source,
-    toUnixTimestamp64Milli(now()) AS _version
+    toUnixTimestamp64Milli(now64()) AS _version
 FROM {{ source('bronze_m365', 'teams_activity') }}
 WHERE userPrincipalName IS NOT NULL
   AND userPrincipalName != ''

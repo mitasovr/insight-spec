@@ -1,6 +1,7 @@
 {{ config(
     materialized='incremental',
     unique_key='unique_key',
+    order_by=['unique_key'],
     schema='staging',
     tags=['m365', 'silver:class_collab_meeting_activity']
 ) }}
@@ -25,13 +26,13 @@ SELECT
         + COALESCE(scheduledRecurringMeetingsOrganizedCount, 0) AS scheduled_meetings_organized,
     COALESCE(scheduledOneTimeMeetingsAttendedCount, 0)
         + COALESCE(scheduledRecurringMeetingsAttendedCount, 0) AS scheduled_meetings_attended,
-    toInt64(toSeconds(parseTimeDelta(ifNull(audioDuration, 'PT0S')))) AS audio_duration_seconds,
-    toInt64(toSeconds(parseTimeDelta(ifNull(videoDuration, 'PT0S')))) AS video_duration_seconds,
-    toInt64(toSeconds(parseTimeDelta(ifNull(screenShareDuration, 'PT0S')))) AS screen_share_duration_seconds,
+    {{ iso8601_duration_seconds("ifNull(audioDuration, 'PT0S')") }} AS audio_duration_seconds,
+    {{ iso8601_duration_seconds("ifNull(videoDuration, 'PT0S')") }} AS video_duration_seconds,
+    {{ iso8601_duration_seconds("ifNull(screenShareDuration, 'PT0S')") }} AS screen_share_duration_seconds,
     reportPeriod AS report_period,
     now() AS collected_at,
     'insight_m365' AS data_source,
-    toUnixTimestamp64Milli(now()) AS _version
+    toUnixTimestamp64Milli(now64()) AS _version
 FROM {{ source('bronze_m365', 'teams_activity') }}
 WHERE userPrincipalName IS NOT NULL
   AND userPrincipalName != ''
