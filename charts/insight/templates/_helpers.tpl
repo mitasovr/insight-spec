@@ -2,18 +2,14 @@
 ==============================================================================
  Umbrella helpers
 ==============================================================================
-Central place for:
-  - release/component names (DRY)
-  - service reference resolution (internal vs external) via enabled-gate
-  - fail-fast validators for required fields
+Central place for release/component names (DRY) and service-reference
+resolution. No separate `internal` vs `external` paths — each dep has a
+single `host`/`port` field that either carries a default (empty → compute
+from release name) or a user-supplied value (e.g. a Constructor Platform
+hostname). The `deploy` flag only controls whether the umbrella itself
+runs the dep as a subchart.
 
-Any template that needs a dependency host/port/URL uses a helper rather
-than hardcoding the name. If SRE ever decides to rename a component,
-only this file changes.
-
-No helper emits a silent default — missing values fail the render with
-a readable message. Defaults in helpers hide typos and lead to mysterious
-runtime failures.
+Every fail-fast check lives in `insight.validate` at the bottom.
 ==============================================================================
 */}}
 
@@ -32,45 +28,29 @@ app.kubernetes.io/part-of: insight
 
 {{/*
 ==============================================================================
- SERVICE RESOLUTION HELPERS
+ SERVICE RESOLUTION
 ==============================================================================
-Contract: each helper returns either the internal DNS (if the subchart is
-enabled) or the value from external.* (if enabled=false). Every field is
-required — no silent defaults. Missing values fail at helm template time.
-
-`enabled: true` means "Insight provides and manages this component".
-`enabled: false` means "the Constructor Platform (or another operator)
-provides it externally; Insight only consumes it". Required for platform
-integration where infra is shared across products.
+Contract per dep:
+  - `<dep>.host` — if empty, defaults to the internal service name.
+  - `<dep>.port` — required (has a value in values.yaml default).
+  - `<dep>.url`  — composed "<scheme>://<host>:<port>" via helpers below.
+  - `<dep>.fqdn` — fully-qualified DNS when the dep is internal, host
+                   verbatim when external — useful for services that live
+                   OUTSIDE the cluster but are resolved via kubelet.
 ==============================================================================
 */}}
 
 {{/* ---------- ClickHouse ---------- */}}
 {{- define "insight.clickhouse.host" -}}
-{{- if .Values.clickhouse.enabled -}}
-{{- printf "%s-clickhouse" .Release.Name -}}
-{{- else -}}
-{{- required "clickhouse.enabled=false requires clickhouse.external.host" .Values.clickhouse.external.host -}}
-{{- end -}}
+{{- default (printf "%s-clickhouse" .Release.Name) .Values.clickhouse.host -}}
 {{- end -}}
 
 {{- define "insight.clickhouse.port" -}}
-{{- if .Values.clickhouse.enabled -}}
-8123
-{{- else -}}
-{{- required "clickhouse.enabled=false requires clickhouse.external.port" .Values.clickhouse.external.port -}}
-{{- end -}}
+{{- required "clickhouse.port is required" .Values.clickhouse.port -}}
 {{- end -}}
 
-{{- /*
-     fqdn = dial-able host. For the internal subchart we build a full
-     cluster-DNS name; for external mode we return the user-provided host
-     verbatim. Don't blindly append `.<ns>.svc.cluster.local` in external
-     mode — that would mangle e.g. `clickhouse.example.com` into
-     `clickhouse.example.com.insight.svc.cluster.local`.
-*/ -}}
 {{- define "insight.clickhouse.fqdn" -}}
-{{- if .Values.clickhouse.enabled -}}
+{{- if .Values.clickhouse.deploy -}}
 {{ include "insight.clickhouse.host" . }}.{{ .Release.Namespace }}.svc.cluster.local
 {{- else -}}
 {{ include "insight.clickhouse.host" . }}
@@ -87,62 +67,38 @@ http://{{ include "insight.clickhouse.host" . }}:{{ include "insight.clickhouse.
 
 {{/* ---------- MariaDB ---------- */}}
 {{- define "insight.mariadb.host" -}}
-{{- if .Values.mariadb.enabled -}}
-{{- printf "%s-mariadb" .Release.Name -}}
-{{- else -}}
-{{- required "mariadb.enabled=false requires mariadb.external.host" .Values.mariadb.external.host -}}
-{{- end -}}
+{{- default (printf "%s-mariadb" .Release.Name) .Values.mariadb.host -}}
 {{- end -}}
 
 {{- define "insight.mariadb.port" -}}
-{{- if .Values.mariadb.enabled -}}
-3306
-{{- else -}}
-{{- required "mariadb.enabled=false requires mariadb.external.port" .Values.mariadb.external.port -}}
-{{- end -}}
+{{- required "mariadb.port is required" .Values.mariadb.port -}}
 {{- end -}}
 
 {{- define "insight.mariadb.database" -}}
-{{- if .Values.mariadb.enabled -}}
-{{- required "mariadb.auth.database is required" .Values.mariadb.auth.database -}}
-{{- else -}}
-{{- required "mariadb.external.database is required" .Values.mariadb.external.database -}}
-{{- end -}}
+{{- required "mariadb.database is required" .Values.mariadb.database -}}
 {{- end -}}
 
 {{/* ---------- Redis ---------- */}}
 {{- define "insight.redis.host" -}}
-{{- if .Values.redis.enabled -}}
-{{- printf "%s-redis-master" .Release.Name -}}
-{{- else -}}
-{{- required "redis.enabled=false requires redis.external.host" .Values.redis.external.host -}}
-{{- end -}}
+{{- default (printf "%s-redis-master" .Release.Name) .Values.redis.host -}}
 {{- end -}}
 
 {{- define "insight.redis.port" -}}
-{{- if .Values.redis.enabled -}}
-6379
-{{- else -}}
-{{- required "redis.enabled=false requires redis.external.port" .Values.redis.external.port -}}
-{{- end -}}
+{{- required "redis.port is required" .Values.redis.port -}}
 {{- end -}}
 
 {{- define "insight.redis.url" -}}
 redis://{{ include "insight.redis.host" . }}:{{ include "insight.redis.port" . }}
 {{- end -}}
 
+{{/* ---------- Redpanda ---------- */}}
+{{- define "insight.redpanda.brokers" -}}
+{{- default (printf "%s-redpanda:9092" .Release.Name) .Values.redpanda.brokers -}}
+{{- end -}}
+
 {{/*
 ==============================================================================
  AIRBYTE (separate release, SAME namespace)
-==============================================================================
-Airbyte is installed as its own Helm release into the same namespace as the
-umbrella (single-namespace deployment model). The DNS is therefore:
-
-  {airbyte-release-name}-airbyte-server-svc.{release-namespace}.svc.cluster.local:8001
-
-If `airbyte.apiUrl` is set explicitly in values, that value wins — useful
-for Constructor Platform integration where the platform provides Airbyte
-externally.
 ==============================================================================
 */}}
 {{- define "insight.airbyte.url" -}}
@@ -153,31 +109,16 @@ http://{{ .Values.airbyte.releaseName }}-airbyte-server-svc.{{ .Release.Namespac
 {{- end -}}
 {{- end -}}
 
-{{/* ---------- Redpanda ---------- */}}
-{{- define "insight.redpanda.brokers" -}}
-{{- if .Values.redpanda.enabled -}}
-{{- printf "%s-redpanda:9092" .Release.Name -}}
-{{- else -}}
-{{- required "redpanda.enabled=false requires redpanda.external.brokers" .Values.redpanda.external.brokers -}}
-{{- end -}}
-{{- end -}}
-
 {{/*
 ==============================================================================
  APP SERVICE HOSTS
 ==============================================================================
-App services are MANDATORY components of Insight — the gateway is the only
-entrance to the cluster internals, the rest of the services sit behind it.
-No enabled-flag here: the umbrella always deploys all four.
-
-These helpers stay for DRY so ingestion templates and any future sidecar
-can reference the services via the same helper pattern.
-==============================================================================
+App services are mandatory umbrella components — no deploy flag.
 */}}
-{{- define "insight.apiGateway.host"   -}}{{- printf "%s-api-gateway"          .Release.Name -}}{{- end -}}
-{{- define "insight.analyticsApi.host" -}}{{- printf "%s-analytics-api"        .Release.Name -}}{{- end -}}
-{{- define "insight.identityResolution.host" -}}{{- printf "%s-identity-resolution" .Release.Name -}}{{- end -}}
-{{- define "insight.frontend.host"     -}}{{- printf "%s-frontend"             .Release.Name -}}{{- end -}}
+{{- define "insight.apiGateway.host"          -}}{{- printf "%s-api-gateway"          .Release.Name -}}{{- end -}}
+{{- define "insight.analyticsApi.host"        -}}{{- printf "%s-analytics-api"        .Release.Name -}}{{- end -}}
+{{- define "insight.identityResolution.host"  -}}{{- printf "%s-identity-resolution" .Release.Name -}}{{- end -}}
+{{- define "insight.frontend.host"            -}}{{- printf "%s-frontend"             .Release.Name -}}{{- end -}}
 
 {{/*
 ==============================================================================
@@ -188,9 +129,9 @@ Invoked from NOTES.txt so they fire on every install.
 ==============================================================================
 */}}
 {{- define "insight.validate" -}}
-  {{- /* OIDC is required when auth is not disabled. Either supply a pre-created
-         Secret, or set ALL three inline fields (issuer, clientId, redirectUri).
-         Checking only one of them lets typos slip through and fails at runtime. */ -}}
+  {{- /* OIDC: when auth is enabled, require either existingSecret or all
+         three inline fields. Partial inline config would fail at runtime
+         inside the subchart. */ -}}
   {{- if not .Values.apiGateway.authDisabled -}}
     {{- if not .Values.apiGateway.oidc.existingSecret -}}
       {{- if or (not .Values.apiGateway.oidc.issuer)
@@ -201,76 +142,33 @@ Invoked from NOTES.txt so they fire on every install.
     {{- end -}}
   {{- end -}}
 
-  {{- /* External-mode contracts. Each dep (CH/MariaDB/Redis/Redpanda) must
-         provide host, port, and credential source — typos in any of these
-         would otherwise only surface at runtime. */ -}}
-
-  {{- /* ClickHouse */ -}}
-  {{- if not .Values.clickhouse.enabled -}}
-    {{- if not .Values.clickhouse.external.host -}}
-      {{- fail "clickhouse.enabled=false requires clickhouse.external.host" -}}
-    {{- end -}}
-    {{- if not .Values.clickhouse.external.port -}}
-      {{- fail "clickhouse.enabled=false requires clickhouse.external.port" -}}
-    {{- end -}}
-    {{- if not .Values.clickhouse.external.credentialsSecret.name -}}
-      {{- fail "clickhouse.enabled=false requires clickhouse.external.credentialsSecret.name" -}}
-    {{- end -}}
+  {{- /* External-mode hosts: when a dep is not deployed by the umbrella,
+         the consumer-facing host must be supplied. Internal deployments
+         compute the host from the release name automatically. */ -}}
+  {{- if and (not .Values.clickhouse.deploy) (not .Values.clickhouse.host) -}}
+    {{- fail "clickhouse.deploy=false requires clickhouse.host" -}}
+  {{- end -}}
+  {{- if and (not .Values.mariadb.deploy) (not .Values.mariadb.host) -}}
+    {{- fail "mariadb.deploy=false requires mariadb.host" -}}
+  {{- end -}}
+  {{- if and (not .Values.redis.deploy) (not .Values.redis.host) -}}
+    {{- fail "redis.deploy=false requires redis.host" -}}
+  {{- end -}}
+  {{- if and (not .Values.redpanda.deploy) (not .Values.redpanda.brokers) -}}
+    {{- fail "redpanda.deploy=false requires redpanda.brokers" -}}
   {{- end -}}
 
-  {{- /* MariaDB */ -}}
-  {{- if not .Values.mariadb.enabled -}}
-    {{- if not .Values.mariadb.external.host -}}
-      {{- fail "mariadb.enabled=false requires mariadb.external.host" -}}
+  {{- /* Passwords live in Secrets — never inline. Validate that the
+         passwordSecret reference is present; the actual Secret may be
+         auto-generated by the umbrella (credentials.autoGenerate=true),
+         mirrored from a platform operator, or pre-created by the user. */ -}}
+  {{- range $dep := list "clickhouse" "mariadb" "redis" -}}
+    {{- $cfg := index $.Values $dep -}}
+    {{- if not $cfg.passwordSecret.name -}}
+      {{- fail (printf "%s.passwordSecret.name is required" $dep) -}}
     {{- end -}}
-    {{- if not .Values.mariadb.external.port -}}
-      {{- fail "mariadb.enabled=false requires mariadb.external.port" -}}
-    {{- end -}}
-    {{- if not .Values.mariadb.external.database -}}
-      {{- fail "mariadb.enabled=false requires mariadb.external.database" -}}
-    {{- end -}}
-    {{- if not .Values.mariadb.external.credentialsSecret.name -}}
-      {{- fail "mariadb.enabled=false requires mariadb.external.credentialsSecret.name" -}}
-    {{- end -}}
-  {{- end -}}
-
-  {{- /* Redis — passwordSecret required only if auth is on for the external instance */ -}}
-  {{- if not .Values.redis.enabled -}}
-    {{- if not .Values.redis.external.host -}}
-      {{- fail "redis.enabled=false requires redis.external.host" -}}
-    {{- end -}}
-    {{- if not .Values.redis.external.port -}}
-      {{- fail "redis.enabled=false requires redis.external.port" -}}
-    {{- end -}}
-  {{- end -}}
-
-  {{- /* Redpanda — SASL credentials required only if external instance uses SASL */ -}}
-  {{- if not .Values.redpanda.enabled -}}
-    {{- if not .Values.redpanda.external.brokers -}}
-      {{- fail "redpanda.enabled=false requires redpanda.external.brokers" -}}
-    {{- end -}}
-    {{- if .Values.redpanda.external.sasl.enabled -}}
-      {{- if not .Values.redpanda.external.sasl.credentialsSecret.name -}}
-        {{- fail "redpanda.external.sasl.enabled=true requires redpanda.external.sasl.credentialsSecret.name" -}}
-      {{- end -}}
-    {{- end -}}
-  {{- end -}}
-
-  {{- /* Bundled-infra credentials — either inline password OR existingSecret
-         is required. When credentials.autoGenerate=true, the umbrella
-         provides {release}-db-creds automatically, so existingSecret is
-         satisfied out of the box. */ -}}
-  {{- if .Values.clickhouse.enabled -}}
-    {{- if and (not .Values.clickhouse.auth.password) (not .Values.clickhouse.auth.existingSecret) -}}
-      {{- fail "clickhouse.enabled=true requires clickhouse.auth.password OR clickhouse.auth.existingSecret (enable credentials.autoGenerate for a turnkey dev path)" -}}
-    {{- end -}}
-  {{- end -}}
-  {{- if .Values.mariadb.enabled -}}
-    {{- if and (not .Values.mariadb.auth.password) (not .Values.mariadb.auth.existingSecret) -}}
-      {{- fail "mariadb.enabled=true requires mariadb.auth.password OR mariadb.auth.existingSecret" -}}
-    {{- end -}}
-    {{- if and (not .Values.mariadb.auth.rootPassword) (not .Values.mariadb.auth.existingSecret) -}}
-      {{- fail "mariadb.enabled=true requires mariadb.auth.rootPassword OR mariadb.auth.existingSecret" -}}
+    {{- if not $cfg.passwordSecret.key -}}
+      {{- fail (printf "%s.passwordSecret.key is required" $dep) -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}

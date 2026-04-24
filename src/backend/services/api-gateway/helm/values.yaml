@@ -44,9 +44,14 @@ oidc:
   redirectUri: ""         # e.g., https://insight.example.com/callback
   # jwksUrl: ""           # Override if JWKS URL differs from {issuer}/v1/keys
 
-# ClickHouse connection
+# ClickHouse connection.
+# Empty default — when installed via the Insight umbrella, the URL is
+# computed from release name + namespace by the umbrella's
+# `insight.clickhouse.url` helper and passed through values (or through
+# the {release}-platform ConfigMap via envFrom).
+# Standalone subchart installs MUST set this explicitly.
 clickhouse:
-  url: "http://insight-clickhouse.insight.svc.cluster.local:8123"
+  url: ""
   database: "gold"
 
 # Set to true to disable authentication (local development only)

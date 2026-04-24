@@ -21,10 +21,10 @@ metadata:
     {{- include "insight.labels" . | nindent 4 }}
 data:
   # ─── ClickHouse ───
-  CLICKHOUSE_HOST:     {{ include "insight.clickhouse.host" .     | quote }}
-  CLICKHOUSE_PORT:     {{ include "insight.clickhouse.port" .     | quote }}
-  CLICKHOUSE_URL:      {{ include "insight.clickhouse.url" .      | quote }}
-  CLICKHOUSE_DATABASE: {{ include "insight.clickhouse.database" . | quote }}
+  CLICKHOUSE_HOST:     {{ include "insight.clickhouse.host" .      | quote }}
+  CLICKHOUSE_PORT:     {{ include "insight.clickhouse.port" .      | quote }}
+  CLICKHOUSE_URL:      {{ include "insight.clickhouse.url" .       | quote }}
+  CLICKHOUSE_DATABASE: {{ include "insight.clickhouse.database" .  | quote }}
 
   # ─── MariaDB ───
   MARIADB_HOST:     {{ include "insight.mariadb.host" .     | quote }}
@@ -34,7 +34,6 @@ data:
   # ─── Redis ───
   REDIS_HOST: {{ include "insight.redis.host" . | quote }}
   REDIS_PORT: {{ include "insight.redis.port" . | quote }}
-  REDIS_URL:  {{ include "insight.redis.url"  . | quote }}
 
   # ─── Redpanda (Kafka-compatible) ───
   REDPANDA_BROKERS: {{ include "insight.redpanda.brokers" . | quote }}

@@ -64,13 +64,33 @@ command -v kubectl >/dev/null || die "kubectl not found"
 log "Cluster: $(kubectl config current-context)"
 log "Namespace: $NAMESPACE · Release: $RELEASE · Chart: $CHART_REF@$VERSION"
 
-# ─── Check Airbyte is reachable (warning only) ─────────────────────────
-# Single-namespace model: Airbyte lives in the same namespace as Insight.
-if ! kubectl -n "$NAMESPACE" get svc airbyte-airbyte-server-svc >/dev/null 2>&1; then
-  log "WARNING: Airbyte not detected in the '$NAMESPACE' namespace."
-  log "         Ingestion workflows will fail until Airbyte is installed."
-  log "         Run: INSIGHT_NAMESPACE=$NAMESPACE ./deploy/scripts/install-airbyte.sh"
-fi
+# ─── Pre-flight: dependencies detected in the namespace ───────────────
+# Single-namespace model — every dependency Insight needs lives in the
+# same namespace. Missing services are warnings, not errors: the umbrella
+# chart still installs, but runtime behaviour depends on what is present.
+_check_svc() {
+  local label="$1" svc="$2" hint="$3"
+  if kubectl -n "$NAMESPACE" get svc "$svc" >/dev/null 2>&1; then
+    log "Found: $label ($svc)"
+  else
+    log "WARNING: $label not detected in '$NAMESPACE' ns — $hint"
+  fi
+}
+
+_check_svc "Airbyte"       "airbyte-airbyte-server-svc" \
+  "ingestion workflows will fail. Run: INSIGHT_NAMESPACE=$NAMESPACE ./deploy/scripts/install-airbyte.sh"
+_check_svc "Argo Workflows" "argo-workflows-server" \
+  "CronWorkflows won't be reconciled. Run: INSIGHT_NAMESPACE=$NAMESPACE ./deploy/scripts/install-argo.sh"
+
+# If the user targets a FRESH cluster (no CH / MariaDB / Redis yet) and
+# has `clickhouse.deploy=true` (the default), the umbrella installs
+# those itself. If they are set to `deploy: false`, a warning here
+# catches missing external dependencies BEFORE helm upgrade runs.
+for dep in insight-clickhouse insight-mariadb insight-redis-master; do
+  if ! kubectl -n "$NAMESPACE" get svc "$dep" >/dev/null 2>&1; then
+    log "Note: $dep not present — umbrella will provision it (if <dep>.deploy=true)."
+  fi
+done
 
 # ─── Install / upgrade ─────────────────────────────────────────────────
 VALUES_ARGS=()

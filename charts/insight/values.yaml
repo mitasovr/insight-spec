@@ -14,49 +14,57 @@
 ## 1. Release name = `insight`. All internal DNS names follow the pattern
 ##    `{.Release.Name}-{component}` (insight-clickhouse, insight-mariadb,
 ##    insight-api-gateway, ...). If you deploy under a different release
-##    name, override the corresponding URLs in your values.
+##    name, override the corresponding `host`/`url` fields in your values.
 ##
 ## 2. SINGLE-NAMESPACE model: Airbyte, Argo Workflows and the umbrella are
 ##    separate Helm releases that all deploy into the release namespace
 ##    (default `insight`). Multiple Insight instances on one cluster use
 ##    different namespaces — each is self-contained.
 ##
-## 3. Each INFRA dependency (ClickHouse, MariaDB, Redis, Redpanda) has an
-##    `enabled: true/false` switch to support Constructor Platform
-##    integration, where infra may be managed centrally and shared across
-##    products:
-##      - enabled: true  → bundled subchart is installed
-##      - enabled: false → external service is used; the `external:` block
-##                         must be filled (host/port/secrets)
-##    The validator in templates/_helpers.tpl fails fast with a clear
-##    error when `enabled: false` is used without `external.host`.
+## 3. Every INFRA dependency (ClickHouse, MariaDB, Redis, Redpanda) is
+##    configured with ONE unified shape, regardless of who runs it:
+##      <dep>.deploy         — the umbrella runs this dep as a subchart (yes/no)
+##      <dep>.host           — host ("" → default to {release}-<dep>)
+##      <dep>.port           — port
+##      <dep>.database       — db name (where applicable)
+##      <dep>.username       — login user
+##      <dep>.passwordSecret — {name, key} pointing at a K8s Secret
+##    When `deploy: false`, the umbrella DOES NOT install the subchart;
+##    everything else — host/port/creds — is just strings the consumers
+##    read, identical to the `deploy: true` case.
 ##
 ## 4. Core app services (apiGateway, analyticsApi, frontend) are MANDATORY
-##    components of the umbrella — no enabled-flag. The gateway is the
+##    components of the umbrella — no deploy-flag. The gateway is the
 ##    only entrance to the cluster internals; the other services are
 ##    reachable only through it. This matches the Constructor Platform
 ##    integration contract.
-##    Identity Resolution (identityResolution) is OPTIONAL (enabled-flag,
-##    off by default) — it is a stub that requires populated bronze data.
+##    Identity Resolution (identityResolution) is OPTIONAL (deploy-flag,
+##    off by default) — it is a C# stub that requires populated bronze
+##    data and is NOT an OIDC provider.
 ##
 ## 5. Resolved infra coordinates (URLs, hosts) live in a single ConfigMap
 ##    named `{release}-platform` (see templates/platform-config.yaml).
 ##    Any pod in the namespace can read them via `envFrom`.
 ##
+## 6. Credentials are stored in Secrets — never inline. With
+##    `credentials.autoGenerate: true` the umbrella provisions
+##    `{release}-db-creds` with random 24-char passwords on first install
+##    and reuses them via `lookup` on subsequent upgrades. For BYO /
+##    platform integration, pre-create the Secret before `helm install`.
+##
 
-# ─── Credentials (auto-generated) ─────────────────────────────────────────
-# Single source of truth for all DB passwords. On first `helm install`,
-# the umbrella generates random 24-char passwords and stores them in the
-# Secret `{release}-db-creds` (keys: clickhouse-password, mariadb-password,
-# mariadb-root-password, redis-password). On subsequent upgrades the
-# existing Secret is REUSED — passwords never change silently.
+# ─── Credentials ──────────────────────────────────────────────────────────
+# Single source of truth for all DB passwords. With autoGenerate=true (the
+# default), the umbrella generates random passwords and stores them in
+# the Secret `{release}-db-creds` (keys: clickhouse-password,
+# mariadb-password, mariadb-root-password, redis-password). Subsequent
+# upgrades reuse the existing Secret via `lookup` — passwords are stable.
 #
 # For Constructor Platform / BYO: pre-create the Secret with your own
-# values before `helm install`; the lookup finds and uses them.
+# values before `helm install`; lookup finds and uses them.
 #
 # To disable auto-gen entirely (air-gapped / custom secret tooling):
-# set autoGenerate=false and pre-create the Secret yourself with all
-# four keys filled in.
+# set autoGenerate=false and pre-create the Secret yourself.
 credentials:
   autoGenerate: true
 
@@ -77,20 +85,11 @@ global:
 # ═══════════════════════════════════════════════════════════════════════════
 #  EXTERNAL — Airbyte (installed as a separate Helm release, SAME namespace)
 # ═══════════════════════════════════════════════════════════════════════════
-#
-# Single-namespace model: Airbyte, Argo Workflows, and the umbrella all
-# live in the release namespace. The Airbyte URL is computed from
-# `airbyte.releaseName` + `.Release.Namespace` (see templates/_helpers.tpl
-# → insight.airbyte.url).
-#
-# For Constructor Platform integration, set `apiUrl` explicitly to point
-# at the platform's externally-managed Airbyte.
-#
 airbyte:
-  releaseName: airbyte             # Helm release name used by install-airbyte.sh
-  apiUrl: ""                       # "" = compute from releaseName + namespace
+  releaseName: airbyte           # Helm release name used by install-airbyte.sh
+  apiUrl: ""                     # "" = compute from releaseName + .Release.Namespace
   jwtSecret:
-    name: airbyte-auth-secrets     # created by the Airbyte chart
+    name: airbyte-auth-secrets   # created by the Airbyte chart itself
     key:  jwt-signature-secret
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -109,64 +108,65 @@ ingestion:
 #  INFRASTRUCTURE
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# Pattern for each dependency:
-#   <dep>.enabled      — true = install bundled subchart
-#   <dep>.external.*   — coordinates of the external service when enabled=false
-#   <dep>.auth.*       — credentials for the bundled subchart when enabled=true
-#
+# Shape per dep:
+#   <dep>.deploy           — umbrella runs the dep as a subchart
+#   <dep>.host / .port     — connection target ("" = default internal)
+#   <dep>.database         — db name (where applicable)
+#   <dep>.username         — login user
+#   <dep>.passwordSecret   — {name, key}
+# The fields below each `deploy: true` block are passed through to the
+# bundled subchart and are ignored when `deploy: false`.
 
 # ─── ClickHouse ──────────────────────────────────────────────────────────
 clickhouse:
-  enabled: true
-  database: "insight"           # DB name, used for both internal and external
+  deploy: true
+  host: ""                      # "" = {release}-clickhouse
+  port: 8123
+  database: "insight"
+  username: "insight"
+  passwordSecret:
+    name: "insight-db-creds"    # umbrella-managed; override for BYO
+    key:  "clickhouse-password"
 
+  # CH wrapper chart settings (read only when deploy=true).
   image:
     repository: clickhouse/clickhouse-server
     tag: "25.3"
-  auth:
-    username: insight
-    # When credentials.autoGenerate=true, password comes from
-    # {release}-db-creds/clickhouse-password. The Secret is generated by
-    # the umbrella (see templates/secrets.yaml). Assumes release=insight;
-    # override `existingSecret` for a different release name.
-    password: ""
-    existingSecret: "insight-db-creds"
-    existingSecretPasswordKey: "clickhouse-password"
   persistence:
     size: 10Gi
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits:   { cpu: "2",  memory: 4Gi   }
-
-  # External mode: fill these in and set enabled=false
-  external:
-    host: ""                     # e.g. clickhouse.internal.acme.com
-    port: ""                     # e.g. 8123 — no default, must be explicit
-    credentialsSecret:
-      name: ""                   # Secret in the insight ns with username/password keys
-      userKey: "username"
-      passwordKey: "password"
+  auth:
+    # Wiring the unified `passwordSecret` to the wrapper chart's own
+    # secretKeyRef config. Keep name/key in sync with the block above.
+    existingSecret: "insight-db-creds"
+    existingSecretPasswordKey: "clickhouse-password"
 
 # ─── MariaDB (bitnami) ───────────────────────────────────────────────────
 # NB: bitnami removed free images from docker.io/bitnami/* in 2025
 # (see https://github.com/bitnami/charts/issues/30850). We point at the
 # bitnamilegacy repository — same images, still free. For enterprise use
-# your own registry (and set `global.security.allowInsecureImages`).
+# your own registry.
 mariadb:
-  enabled: true
+  deploy: true
+  host: ""                      # "" = {release}-mariadb
+  port: 3306
+  database: "insight"
+  username: "insight"
+  passwordSecret:
+    name: "insight-db-creds"
+    key:  "mariadb-password"
+
+  # Bitnami chart settings (read only when deploy=true).
   architecture: standalone
   image:
     registry: docker.io
     repository: bitnamilegacy/mariadb
   auth:
-    database: insight
-    username: insight
-    # bitnami/mariadb `auth.existingSecret` accepts a Secret with keys
-    # `mariadb-password` and `mariadb-root-password` — our umbrella
-    # generates both in `{release}-db-creds`.
+    # bitnami/mariadb natively reads `mariadb-password` and
+    # `mariadb-root-password` keys from auth.existingSecret.
     existingSecret: "insight-db-creds"
-    password: ""
-    rootPassword: ""
   primary:
     persistence:
       size: 5Gi
@@ -174,26 +174,21 @@ mariadb:
       requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 500m, memory: 512Mi }
 
-  external:
-    host: ""                     # e.g. mysql.internal.acme.com
-    port: ""                     # e.g. 3306
-    database: ""                 # e.g. insight
-    credentialsSecret:
-      name: ""                   # Secret with username/password keys
-      userKey: "username"
-      passwordKey: "password"
-
 # ─── Redis (bitnami) ─────────────────────────────────────────────────────
-# Same registry caveat as mariadb above.
 redis:
-  enabled: true
+  deploy: true
+  host: ""                      # "" = {release}-redis-master
+  port: 6379
+  passwordSecret:
+    name: "insight-db-creds"
+    key:  "redis-password"
+
+  # Bitnami chart settings (read only when deploy=true).
   architecture: standalone
   image:
     registry: docker.io
     repository: bitnamilegacy/redis
   auth:
-    # Always on — matches the "always with password" policy. Password
-    # from the umbrella-generated Secret.
     enabled: true
     existingSecret: "insight-db-creds"
     existingSecretPasswordKey: "redis-password"
@@ -204,17 +199,13 @@ redis:
       requests: { cpu: 50m,  memory: 64Mi }
       limits:   { cpu: 250m, memory: 128Mi }
 
-  external:
-    host: ""                     # e.g. redis.internal.acme.com
-    port: ""                     # e.g. 6379
-    passwordSecret:
-      name: ""
-      key: "password"
-
 # ─── Redpanda ────────────────────────────────────────────────────────────
 # For enterprise: TLS on, SASL on, 3+ replicas.
 redpanda:
-  enabled: true
+  deploy: true
+  brokers: ""                   # "" = {release}-redpanda:9092
+
+  # Redpanda chart settings (read only when deploy=true).
   statefulset:
     replicas: 1
   resources:
@@ -237,31 +228,14 @@ redpanda:
   console:
     enabled: true
 
-  external:
-    brokers: ""                  # "broker1:9092,broker2:9092" — no default
-    tls:
-      enabled: false
-    sasl:
-      enabled: false
-      mechanism: "SCRAM-SHA-256"
-      credentialsSecret:
-        name: ""
-        usernameKey: "username"
-        passwordKey: "password"
-
 # ═══════════════════════════════════════════════════════════════════════════
-#  APPLICATION SERVICES (mandatory — no enabled-flag)
+#  APPLICATION SERVICES (mandatory — no deploy-flag)
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# NOTE: values like `<svc>.database.url`, `<svc>.clickhouse.url`,
-# `<svc>.redis.url` are hardcoded to the internal DNS. Helm cannot
-# template values files, so when you flip infra to external mode
-# (enabled: false + external.host: ...) you MUST also override the
-# corresponding URLs in your overrides.
-#
-# Preferred long-term path: migrate these services to read from the
-# {release}-platform ConfigMap via envFrom (see templates/platform-config.yaml).
-# Then URLs become unnecessary in values. Planned for the next iteration.
+# App-service subcharts consume their config from a Secret generated by
+# the umbrella (see templates/secrets.yaml). When `existingSecret` is set,
+# the subchart skips its own Secret template; all ANALYTICS__* / similar
+# env vars come from the umbrella-managed Secret.
 
 # ─── API Gateway ─────────────────────────────────────────────────────────
 apiGateway:
@@ -275,6 +249,8 @@ apiGateway:
     limits:   { cpu: 500m, memory: 256Mi }
 
   ingress:
+    # Create a Kubernetes Ingress resource for this service. The cluster
+    # must already have an ingress controller (nginx, traefik, …).
     enabled: false
     className: nginx
     host: ""
@@ -295,7 +271,11 @@ apiGateway:
   authDisabled: false           # true = disable auth (LOCAL DEV ONLY)
 
   clickhouse:
-    url: "http://insight-clickhouse:8123"   # must match the resolved URL
+    # Left empty: the umbrella overrides at render time with the
+    # resolved URL from `insight.clickhouse.url`. See the `--set` in
+    # templates/api-gateway-extras.yaml (if introduced) or pass
+    # `--set apiGateway.clickhouse.url=<custom>` for overrides.
+    url: "http://insight-clickhouse:8123"
     database: "gold"
 
   gateway:
@@ -327,32 +307,13 @@ analyticsApi:
   # skips its own Secret template when existingSecret is set.
   existingSecret: "insight-analytics-api-config"
 
-  # The fields below are the subchart's own defaults. They are consulted
-  # only if existingSecret is empty (e.g. legacy install). Kept for
-  # compatibility; prefer the existingSecret path.
-  database:
-    url: ""
-  clickhouse:
-    url: "http://insight-clickhouse:8123"
-    database: "insight"
-    credentialsSecret:
-      name: ""
-      userKey: "username"
-      passwordKey: "password"
-    user: ""
-    password: ""
-  identityResolution:
-    url: "http://insight-identity-resolution:8082"
-  redis:
-    url: "redis://insight-redis-master:6379"
-
 # ─── Identity Resolution (C# stub, OFF by default) ──────────────────────
 # NOT the OIDC identity provider. This is a person-record normalizer that
 # queries bronze_bamboohr.employees (populated by an Airbyte BambooHR
 # sync). Without ingestion data it crashloops on startup. Off by default
 # — enable only after at least one BambooHR sync has run.
 identityResolution:
-  enabled: false
+  deploy: false
   replicaCount: 1
   image:
     repository: ghcr.io/cyberfabric/insight-identity-resolution
@@ -361,18 +322,9 @@ identityResolution:
   resources:
     requests: { cpu: 50m,  memory: 64Mi }
     limits:   { cpu: 250m, memory: 256Mi }
-  # When enabled=true the umbrella also generates
+  # When deploy=true the umbrella also generates
   # `insight-identity-resolution-config` with IDENTITY__* env vars.
   existingSecret: "insight-identity-resolution-config"
-  clickhouse:
-    url: "http://insight-clickhouse:8123"
-    database: "insight"
-    credentialsSecret:
-      name: ""
-      userKey: "username"
-      passwordKey: "password"
-    user: ""
-    password: ""
 
 # ─── Frontend (SPA) ──────────────────────────────────────────────────────
 frontend:

@@ -8,20 +8,20 @@ Release:    {{ .Release.Name }}
 Revision:   {{ .Release.Revision }}
 
 Resolved infra endpoints (see ConfigMap {{ .Release.Name }}-platform):
-  ClickHouse:  {{ include "insight.clickhouse.url" . }}  {{ if not .Values.clickhouse.enabled }}[external]{{ end }}
-  MariaDB:     {{ include "insight.mariadb.host" . }}:{{ include "insight.mariadb.port" . }}  {{ if not .Values.mariadb.enabled }}[external]{{ end }}
-  Redis:       {{ include "insight.redis.url" . }}  {{ if not .Values.redis.enabled }}[external]{{ end }}
-  Redpanda:    {{ include "insight.redpanda.brokers" . }}  {{ if not .Values.redpanda.enabled }}[external]{{ end }}
-  Airbyte:     {{ .Values.airbyte.apiUrl }}
+  ClickHouse:  {{ include "insight.clickhouse.url" . }}  {{ if not .Values.clickhouse.deploy }}[external]{{ end }}
+  MariaDB:     {{ include "insight.mariadb.host" . }}:{{ include "insight.mariadb.port" . }}  {{ if not .Values.mariadb.deploy }}[external]{{ end }}
+  Redis:       {{ include "insight.redis.url" . }}  {{ if not .Values.redis.deploy }}[external]{{ end }}
+  Redpanda:    {{ include "insight.redpanda.brokers" . }}  {{ if not .Values.redpanda.deploy }}[external]{{ end }}
+  Airbyte:     {{ include "insight.airbyte.url" . }}
 
 Application services (always-on):
   ✓ API Gateway        http://{{ include "insight.apiGateway.host" . }}:8080
   ✓ Analytics API      http://{{ include "insight.analyticsApi.host" . }}:8081
   ✓ Frontend           http://{{ include "insight.frontend.host" . }}:80
-{{- if .Values.identityResolution.enabled }}
-  ✓ Identity Res.      http://{{ include "insight.identityResolution.host" . }}:8082  (enabled)
+{{- if .Values.identityResolution.deploy }}
+  ✓ Identity Res.      http://{{ include "insight.identityResolution.host" . }}:8082  (deployed)
 {{- else }}
-  · Identity Res.      disabled (requires BambooHR sync; enable via identityResolution.enabled=true)
+  · Identity Res.      not deployed (requires BambooHR sync; enable via identityResolution.deploy=true)
 {{- end }}
 {{- if .Values.ingestion.templates.enabled }}
   ✓ Ingestion templates: airbyte-sync, dbt-run, ingestion-pipeline

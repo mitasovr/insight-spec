@@ -57,27 +57,27 @@ dependencies:
   - name: clickhouse
     version: "0.1.0"
     repository: "file://../../helmfile/charts/clickhouse"
-    condition: clickhouse.enabled
+    condition: clickhouse.deploy
 
   # MariaDB — operational DB (tenants, plugin installs, configs).
   # Bitnami chart, OCI registry. Semver ~20.0.0 = 20.x security patches.
   - name: mariadb
     version: "~20.0.0"
     repository: "oci://registry-1.docker.io/bitnamicharts"
-    condition: mariadb.enabled
+    condition: mariadb.deploy
 
   # Redis — query response cache for analytics-api.
   - name: redis
     version: "~21.0.0"
     repository: "oci://registry-1.docker.io/bitnamicharts"
-    condition: redis.enabled
+    condition: redis.deploy
 
   # Redpanda — event bus (notifications, audit log, future).
   # Kafka-compatible, simpler to operate.
   - name: redpanda
     version: "~5.0.0"
     repository: "https://charts.redpanda.com"
-    condition: redpanda.enabled
+    condition: redpanda.deploy
 
   # ─── Application services ──────────────────────────────────────────────
   # All aliases are camelCase so values.yaml stays clean.
@@ -106,7 +106,7 @@ dependencies:
     alias: identityResolution
     version: "0.1.0"
     repository: "file://../../src/backend/services/identity/helm"
-    condition: identityResolution.enabled
+    condition: identityResolution.deploy
 
   - name: insight-frontend
     alias: frontend
