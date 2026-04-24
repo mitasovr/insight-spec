@@ -176,7 +176,7 @@ can reference the services via the same helper pattern.
 */}}
 {{- define "insight.apiGateway.host"   -}}{{- printf "%s-api-gateway"          .Release.Name -}}{{- end -}}
 {{- define "insight.analyticsApi.host" -}}{{- printf "%s-analytics-api"        .Release.Name -}}{{- end -}}
-{{- define "insight.identity.host"     -}}{{- printf "%s-identity-resolution" .Release.Name -}}{{- end -}}
+{{- define "insight.identityResolution.host" -}}{{- printf "%s-identity-resolution" .Release.Name -}}{{- end -}}
 {{- define "insight.frontend.host"     -}}{{- printf "%s-frontend"             .Release.Name -}}{{- end -}}
 
 {{/*
@@ -256,20 +256,21 @@ Invoked from NOTES.txt so they fire on every install.
     {{- end -}}
   {{- end -}}
 
-  {{- /* Bundled-infra credentials — when the subchart is installed by the
-         umbrella, it needs a password. Empty defaults in canonical values
-         (see #4 in the review) prevent accidental `changeme` in prod. */ -}}
+  {{- /* Bundled-infra credentials — either inline password OR existingSecret
+         is required. When credentials.autoGenerate=true, the umbrella
+         provides {release}-db-creds automatically, so existingSecret is
+         satisfied out of the box. */ -}}
   {{- if .Values.clickhouse.enabled -}}
-    {{- if not .Values.clickhouse.auth.password -}}
-      {{- fail "clickhouse.enabled=true requires clickhouse.auth.password (use -f deploy/values-dev.yaml for eval defaults)" -}}
+    {{- if and (not .Values.clickhouse.auth.password) (not .Values.clickhouse.auth.existingSecret) -}}
+      {{- fail "clickhouse.enabled=true requires clickhouse.auth.password OR clickhouse.auth.existingSecret (enable credentials.autoGenerate for a turnkey dev path)" -}}
     {{- end -}}
   {{- end -}}
   {{- if .Values.mariadb.enabled -}}
-    {{- if not .Values.mariadb.auth.password -}}
-      {{- fail "mariadb.enabled=true requires mariadb.auth.password (use -f deploy/values-dev.yaml for eval defaults)" -}}
+    {{- if and (not .Values.mariadb.auth.password) (not .Values.mariadb.auth.existingSecret) -}}
+      {{- fail "mariadb.enabled=true requires mariadb.auth.password OR mariadb.auth.existingSecret" -}}
     {{- end -}}
-    {{- if not .Values.mariadb.auth.rootPassword -}}
-      {{- fail "mariadb.enabled=true requires mariadb.auth.rootPassword" -}}
+    {{- if and (not .Values.mariadb.auth.rootPassword) (not .Values.mariadb.auth.existingSecret) -}}
+      {{- fail "mariadb.enabled=true requires mariadb.auth.rootPassword OR mariadb.auth.existingSecret" -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}

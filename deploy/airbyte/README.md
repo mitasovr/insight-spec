@@ -22,8 +22,8 @@ All Insight components (Airbyte, Argo Workflows, the umbrella) live in one names
 
 | Component   | Version | Status |
 |-------------|---------|--------|
-| Chart       | 1.5.1   | supported |
-| Application | 1.5.1   | matches chart appVersion |
+| Chart       | 1.8.5   | supported |
+| Application | 1.8.5   | matches chart appVersion |
 
 Upgrades happen in a dedicated PR with regression tests over the ingestion workflows.
 
@@ -39,7 +39,7 @@ helm repo add airbyte https://airbytehq.github.io/helm-charts
 helm repo update
 helm upgrade --install airbyte airbyte/airbyte \
   --namespace insight --create-namespace \
-  --version 1.5.1 \
+  --version 1.8.5 \
   -f deploy/airbyte/values.yaml \
   --wait --timeout 15m
 ```
@@ -65,7 +65,7 @@ Override the namespace with `INSIGHT_NAMESPACE=...` (for example, when running m
    ```bash
    helm upgrade --install airbyte airbyte/airbyte \
      --namespace insight --create-namespace \
-     --version 1.5.1 \
+     --version 1.8.5 \
      -f deploy/airbyte/values.yaml \
      -f deploy/airbyte/values-prod.yaml \
      --wait --timeout 15m

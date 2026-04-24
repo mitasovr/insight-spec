@@ -57,18 +57,25 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 
 # ─── Install / upgrade ─────────────────────────────────────────────────
 VALUES_ARGS=(-f "$VALUES")
+# Automatic dev overlay: dev-up.sh sets DEV_MODE=1 to get auth-off UI.
+if [[ "${DEV_MODE:-0}" == "1" && -f "deploy/argo/values-dev.yaml" ]]; then
+  VALUES_ARGS+=(-f "deploy/argo/values-dev.yaml")
+  log "DEV_MODE=1 — merging deploy/argo/values-dev.yaml (auth-mode=server)"
+fi
 [[ -n "$EXTRA" ]] && VALUES_ARGS+=(-f "$EXTRA")
 
 log "Running helm upgrade --install"
 # `controller.workflowNamespaces` and `controller.instanceID` are set via
-# --set so they track the release namespace. The chart values only carries
-# namespace-agnostic defaults.
+# --set so they track the release namespace. The argo-workflows chart
+# expects instanceID to be a sub-object (enabled + explicitID), not a
+# plain string — hence the dotted keys below.
 helm upgrade --install "$RELEASE" argo/argo-workflows \
   --namespace "$NAMESPACE" --create-namespace \
   --version "$VERSION" \
   "${VALUES_ARGS[@]}" \
   --set "controller.workflowNamespaces[0]=$NAMESPACE" \
-  --set "controller.instanceID=$RELEASE-$NAMESPACE" \
+  --set "controller.instanceID.enabled=true" \
+  --set "controller.instanceID.explicitID=$RELEASE-$NAMESPACE" \
   --wait --timeout 5m
 
 # ─── Apply supplemental RBAC ───────────────────────────────────────────

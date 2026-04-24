@@ -4,7 +4,7 @@
 ## Applied to the OFFICIAL airbyte/airbyte chart, not a wrapper —
 ## customization is values-only (see install-airbyte.sh).
 ##
-## Chart version is pinned in the installer / GitOps manifest. Current: 1.5.1.
+## Chart version is pinned in the installer / GitOps manifest. Current: 1.8.5.
 ##
 ## What is here:
 ##   - safe defaults for eval/demo (embedded Postgres + MinIO)
@@ -24,10 +24,19 @@ global:
   # Deployment mode. community = OSS, enterprise = commercial license.
   edition: community
 
-  # Auth. Keycloak pulls in an additional Postgres and a service. We have
-  # our own OIDC surface via apiGateway.oidc in the umbrella, so it is off.
+  # Auth: always on. The Airbyte chart generates a random admin password
+  # on first install and stores it in `airbyte-auth-secrets`
+  # (key: instance-admin-password). We disable only Keycloak — it pulls
+  # in an extra Postgres and duplicates our own OIDC surface from the
+  # Insight umbrella. Server-signed JWT for API access still works.
+  #
+  # In Airbyte 1.5.x simple-auth mode the admin email/organization must
+  # be configured through a one-time API setup call — install-airbyte.sh
+  # does this automatically post-install (sets admin@example.com +
+  # organization `Insight`). Setting `instanceAdmin.email` in values has
+  # no effect in this mode.
   auth:
-    enabled: false
+    enabled: true
 
   # Storage for logs and state.
   # Defaults to embedded MinIO. For prod → s3/gcs/azure (see below).
@@ -118,8 +127,10 @@ temporal:
 
 cron:
   resources:
-    requests: { cpu: 50m,  memory: 128Mi }
-    limits:   { cpu: 200m, memory: 256Mi }
+    # Airbyte's scheduler; 256Mi is too tight once it holds a
+    # Temporal worker pool — we saw OOMKilled on Kind. Bumped to 512Mi.
+    requests: { cpu: 50m,  memory: 256Mi }
+    limits:   { cpu: 200m, memory: 512Mi }
 
 # Connector Builder UI. In dev you may turn it off to save resources;
 # for prod keep it on — useful for Low-Code Connectors.

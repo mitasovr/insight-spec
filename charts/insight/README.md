@@ -60,7 +60,7 @@ Before going to prod:
 - [ ] Set secrets via `existingSecret` references, **never inline**:
   - `apiGateway.oidc.existingSecret`
   - `analyticsApi.clickhouse.credentialsSecret.name`
-  - `identity.clickhouse.credentialsSecret.name`
+  - `identityResolution.clickhouse.credentialsSecret.name` (when `identityResolution.enabled=true`)
 - [ ] Override all `changeme` passwords: `clickhouse.auth.password`, `mariadb.auth.*`
 - [ ] Enable ingress + TLS: `apiGateway.ingress`, `frontend.ingress`
 - [ ] Bump resources where needed (default `requests` are conservative)

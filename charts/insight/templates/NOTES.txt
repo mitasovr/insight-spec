@@ -17,8 +17,12 @@ Resolved infra endpoints (see ConfigMap {{ .Release.Name }}-platform):
 Application services (always-on):
   ✓ API Gateway        http://{{ include "insight.apiGateway.host" . }}:8080
   ✓ Analytics API      http://{{ include "insight.analyticsApi.host" . }}:8081
-  ✓ Identity           http://{{ include "insight.identity.host" . }}:8082
   ✓ Frontend           http://{{ include "insight.frontend.host" . }}:80
+{{- if .Values.identityResolution.enabled }}
+  ✓ Identity Res.      http://{{ include "insight.identityResolution.host" . }}:8082  (enabled)
+{{- else }}
+  · Identity Res.      disabled (requires BambooHR sync; enable via identityResolution.enabled=true)
+{{- end }}
 {{- if .Values.ingestion.templates.enabled }}
   ✓ Ingestion templates: airbyte-sync, dbt-run, ingestion-pipeline
 {{- end }}
@@ -40,4 +44,14 @@ Next steps:
 {{ if not .Values.apiGateway.oidc.existingSecret -}}
 ⚠  WARNING: apiGateway.oidc.existingSecret is empty. For production set
             existingSecret or inline issuer/clientId/redirectUri.
+{{- end }}
+
+{{- if .Values.credentials.autoGenerate }}
+
+Auto-generated DB credentials (stored in Secret {{ .Release.Name }}-db-creds):
+
+  ClickHouse:       kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-db-creds -o jsonpath='{.data.clickhouse-password}' | base64 -d
+  MariaDB user:     kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-db-creds -o jsonpath='{.data.mariadb-password}' | base64 -d
+  MariaDB root:     kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-db-creds -o jsonpath='{.data.mariadb-root-password}' | base64 -d
+  Redis:            kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-db-creds -o jsonpath='{.data.redis-password}' | base64 -d
 {{- end }}

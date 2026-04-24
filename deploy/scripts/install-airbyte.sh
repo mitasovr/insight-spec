@@ -12,7 +12,7 @@
 # Environment overrides:
 #   INSIGHT_NAMESPACE  (default: insight) — shared by all components
 #   AIRBYTE_RELEASE    (default: airbyte)
-#   AIRBYTE_VERSION    (default: 1.5.1)
+#   AIRBYTE_VERSION    (default: 1.8.5)
 #   AIRBYTE_VALUES     (default: deploy/airbyte/values.yaml)
 #   EXTRA_VALUES_FILE  additional -f values.yaml (for prod overrides)
 #
@@ -27,7 +27,7 @@ cd "$ROOT_DIR"
 
 NAMESPACE="${INSIGHT_NAMESPACE:-insight}"
 RELEASE="${AIRBYTE_RELEASE:-airbyte}"
-VERSION="${AIRBYTE_VERSION:-1.5.1}"
+VERSION="${AIRBYTE_VERSION:-1.8.5}"
 VALUES="${AIRBYTE_VALUES:-deploy/airbyte/values.yaml}"
 EXTRA="${EXTRA_VALUES_FILE:-}"
 
@@ -72,6 +72,45 @@ else
   log "WARNING: airbyte-auth-secrets not yet present in $NAMESPACE."
   log "         It is created by the Airbyte chart on first boot; rerun"
   log "         this script after Airbyte finishes starting."
+fi
+
+# ─── Initial setup wizard ──────────────────────────────────────────────
+# Airbyte 1.5.x simple-auth shows a setup wizard on first UI visit that
+# can leave the instance in a half-initialised state if the user clicks
+# away. Complete it via API so UI login works out of the box.
+#
+# Idempotent: if setup is already complete, the second call is a no-op.
+SETUP_EMAIL="${AIRBYTE_SETUP_EMAIL:-admin@example.com}"
+SETUP_ORG="${AIRBYTE_SETUP_ORG:-Insight}"
+
+if kubectl -n "$NAMESPACE" get secret airbyte-auth-secrets >/dev/null 2>&1; then
+  log "Completing initial setup via API (email=$SETUP_EMAIL, org=$SETUP_ORG)"
+  # Port-forward via a temporary tunnel — don't assume a pre-existing PF.
+  kubectl -n "$NAMESPACE" port-forward svc/"$RELEASE"-airbyte-server-svc 18001:8001 >/dev/null 2>&1 &
+  PF_PID=$!
+  # Wait up to 20s for server API.
+  for _ in $(seq 1 20); do
+    curl -sf -o /dev/null http://localhost:18001/api/v1/instance_configuration && break
+    sleep 1
+  done
+
+  CID=$(kubectl -n "$NAMESPACE" get secret airbyte-auth-secrets -o jsonpath='{.data.instance-admin-client-id}' | base64 -d)
+  CSEC=$(kubectl -n "$NAMESPACE" get secret airbyte-auth-secrets -o jsonpath='{.data.instance-admin-client-secret}' | base64 -d)
+  TOKEN=$(curl -sf -X POST http://localhost:18001/api/v1/applications/token \
+    -H "Content-Type: application/json" \
+    -d "{\"client_id\":\"$CID\",\"client_secret\":\"$CSEC\"}" -m 10 \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null || true)
+
+  if [[ -n "$TOKEN" ]]; then
+    curl -sf -X POST http://localhost:18001/api/v1/instance_configuration/setup \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $TOKEN" \
+      -d "{\"email\":\"$SETUP_EMAIL\",\"organizationName\":\"$SETUP_ORG\",\"initialSetupComplete\":true,\"anonymousDataCollection\":false,\"news\":false,\"securityUpdates\":false}" \
+      -m 10 -o /dev/null && log "Initial setup complete." || log "Initial setup call failed (may already be set up)."
+  else
+    log "Could not mint access token; skipping setup wizard (complete via UI)."
+  fi
+  kill "$PF_PID" 2>/dev/null || true
 fi
 
 # ─── Summary ───────────────────────────────────────────────────────────

@@ -39,7 +39,9 @@ spec:
         parameters:
           - name: controller.workflowNamespaces[0]
             value: insight
-          - name: controller.instanceID
+          - name: controller.instanceID.enabled
+            value: "true"
+          - name: controller.instanceID.explicitID
             value: argo-workflows-insight
 
     - repoURL: https://github.com/cyberfabric/insight.git

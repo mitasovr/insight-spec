@@ -1,0 +1,21 @@
+{{/*
+Init script that runs once on first ClickHouse container start.
+Mounted at /docker-entrypoint-initdb.d/ — the upstream image runs
+every .sql / .sh file there after the server boots, and writes a
+marker file so subsequent restarts skip the scripts.
+
+Creates the `insight` database that the app services and ingestion
+dbt models expect. Additional per-source bronze databases
+(bronze_bamboohr, bronze_slack, etc.) are created lazily by the
+ingestion pipelines themselves.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clickhouse.fullname" . }}-init
+  labels:
+    {{- include "clickhouse.labels" . | nindent 4 }}
+data:
+  001-insight-db.sql: |
+    CREATE DATABASE IF NOT EXISTS insight;
+    CREATE DATABASE IF NOT EXISTS bronze_bamboohr;

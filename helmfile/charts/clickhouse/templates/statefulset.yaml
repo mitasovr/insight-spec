@@ -27,8 +27,16 @@ spec:
           env:
             - name: CLICKHOUSE_USER
               value: {{ .Values.auth.username | quote }}
+            {{- if .Values.auth.existingSecret }}
             - name: CLICKHOUSE_PASSWORD
-              value: {{ .Values.auth.password | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret | quote }}
+                  key:  {{ .Values.auth.existingSecretPasswordKey | default "password" | quote }}
+            {{- else }}
+            - name: CLICKHOUSE_PASSWORD
+              value: {{ required "auth.password is required when auth.existingSecret is empty" .Values.auth.password | quote }}
+            {{- end }}
             - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
               value: "1"
           resources:
@@ -36,6 +44,9 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/clickhouse
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /ping
@@ -48,6 +59,10 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
+      volumes:
+        - name: init
+          configMap:
+            name: {{ include "clickhouse.fullname" . }}-init
   volumeClaimTemplates:
     - metadata:
         name: data
