@@ -27,6 +27,7 @@ from typing import (
 import pendulum
 import requests  # type: ignore[import]
 from pendulum import DateTime  # type: ignore[attr-defined]
+from pendulum.parsing.exceptions import ParserError
 from requests import exceptions
 
 from airbyte_cdk import (
@@ -1167,12 +1168,31 @@ class IncrementalRestSalesforceStream(RestSalesforceStream, CheckpointMixin, ABC
             query = f"SELECT {select_fields} FROM {table_name}"
             return {"q": query}
 
-        start_date = max(
-            (stream_state or {}).get(self.cursor_field, self.start_date),
-            (stream_slice or {}).get("start_date", ""),
-            (next_page_token or {}).get("start_date", ""),
+        # Normalize cursor boundaries to canonical SOQL datetime literals
+        # (YYYY-MM-DDTHH:MM:SS.sss+00:00) before interpolation. Inputs can
+        # arrive as ISO variants from state / slices / page tokens; unparsable
+        # values drop to "" so the filter is simply omitted rather than
+        # producing a malformed SOQL predicate.
+        def _soql_dt(value: Any) -> str:
+            if not value:
+                return ""
+            try:
+                return pendulum.parse(str(value)).in_timezone("UTC").isoformat(timespec="milliseconds")
+            except (ParserError, ValueError):
+                return ""
+
+        candidates = [
+            _soql_dt((stream_state or {}).get(self.cursor_field, self.start_date)),
+            _soql_dt((stream_slice or {}).get("start_date", "")),
+            _soql_dt((next_page_token or {}).get("start_date", "")),
+        ]
+        start_date = max(c for c in candidates if c) if any(candidates) else ""
+        end_date = _soql_dt(
+            (stream_slice or {}).get(
+                "end_date",
+                pendulum.now(tz="UTC").isoformat(timespec="milliseconds"),
+            )
         )
-        end_date = (stream_slice or {}).get("end_date", pendulum.now(tz="UTC").isoformat(timespec="milliseconds"))
 
         where_conditions = []
 

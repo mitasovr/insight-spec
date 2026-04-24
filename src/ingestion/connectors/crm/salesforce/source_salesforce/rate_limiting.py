@@ -128,8 +128,16 @@ class SalesforceErrorHandler(ErrorHandler):
             if response.status_code == 401:
                 error_code, _ = self._extract_error_code_and_message(response)
                 if error_code == "INVALID_SESSION_ID":
-                    if self._token_provider is not None:
-                        self._token_provider.force_refresh()
+                    if self._token_provider is None:
+                        # Without a refresh provider, retrying replays the
+                        # stale token forever. Fail so the caller surfaces a
+                        # clear auth error instead of hiding it behind retries.
+                        return ErrorResolution(
+                            ResponseAction.FAIL,
+                            FailureType.config_error,
+                            "Salesforce session expired and no token refresh provider is wired for this handler.",
+                        )
+                    self._token_provider.force_refresh()
                     return ErrorResolution(
                         ResponseAction.RETRY,
                         FailureType.transient_error,
