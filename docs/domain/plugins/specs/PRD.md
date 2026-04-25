@@ -625,9 +625,9 @@ Every installed plugin **MUST** report its operational status to the plugin runt
 
 - [ ] `p2` - **ID**: `cpt-plugin-fr-dep-graph-ui`
 
-Instance admins **MUST** be able to view the dependency graph across all installed plugins with per-node health state (healthy, degraded, broken, upgrade available, in-shadow-trial). Tenant admins **MUST** see the subset of the graph relevant to their tenant, including any shadow-deploy trials currently in flight.
+Instance admins **SHOULD** be able to view the dependency graph across all installed plugins with per-node health state (healthy, degraded, broken, upgrade available, in-shadow-trial). Tenant admins **SHOULD** see the subset of the graph relevant to their tenant, including any shadow-deploy trials currently in flight.
 
-**Rationale**: Plugin ecosystems grow dense fast, and the system is explicitly non-auto-healing (no legacy mode, no silent rollback) — failures and conflicts must be investigated by a human. A visual graph is the only scalable way to find "what is broken and what does it block". For tenant admins during a shadow-deploy trial, seeing the live stack and the shadow stack side-by-side is part of the core upgrade workflow (`cpt-plugin-fr-snapshot-shadow-deploy`), not a nice-to-have.
+**Rationale**: Plugin ecosystems grow dense fast, and the system is explicitly non-auto-healing (no legacy mode, no silent rollback) — failures and conflicts must be investigated by a human. A visual graph is a scalable way to find "what is broken and what does it block." Note: the side-by-side **comparison view** during a shadow-deploy trial is a separate `MUST` already covered by `cpt-plugin-fr-snapshot-shadow-deploy`; this FR is the broader cross-plugin / cross-tenant graph, kept at `SHOULD` because a flat list view of installs with health badges is sufficient for v1 operability. A graph visualization is the right long-term shape but not release-gating.
 
 **Actors**: `cpt-plugin-actor-instance-admin`, `cpt-plugin-actor-tenant-admin`
 
@@ -940,7 +940,7 @@ An instance **MUST** support at least 50 plugin installs per tenant and at least
 - [ ] A connector plugin using the Airbyte source protocol can be installed without the plugin author reimplementing destination logic
 - [ ] A widget plugin loads in the host frontend at runtime without a product rebuild
 - [ ] When a silver plugin's data-quality tests fail, the transform does not run and an admin-visible failure is recorded
-- [ ] An instance admin can view the dependency graph of all installed plugins across all tenants, with per-node health state and per-snapshot grouping
+- [ ] An instance admin can inspect the inventory of all installed plugins across all tenants with per-install health state and per-snapshot grouping (a flat list view satisfies this; a graph visualization is a `SHOULD` per `cpt-plugin-fr-dep-graph-ui` and is not release-gating)
 - [ ] Attempting to install a plugin whose manifest is invalid (missing required fields, malformed schema) fails at the admin-API layer with a clear error, before any runtime action
 - [ ] All plugin-produced tables are reachable only through the install's per-install user with scoped GRANTs; cross-tenant and cross-install reads are rejected at the database layer, not merely filtered by application code
 
