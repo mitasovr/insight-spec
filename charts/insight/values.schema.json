@@ -1,9 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Insight umbrella values",
-  "description": "Minimal schema. Expands as values stabilize.",
+  "description": "Minimal schema. Validates the unified per-dependency shape (deploy + flat host/port/passwordSecret) and enforces image.tag is set on every app service.",
   "type": "object",
   "properties": {
+    "credentials": {
+      "type": "object",
+      "properties": {
+        "autoGenerate": { "type": "boolean" }
+      }
+    },
+
     "global": {
       "type": "object",
       "properties": {
@@ -14,10 +21,10 @@
       }
     },
 
-    "clickhouse": { "$ref": "#/definitions/subchartToggle" },
-    "mariadb":    { "$ref": "#/definitions/subchartToggle" },
-    "redis":      { "$ref": "#/definitions/subchartToggle" },
-    "redpanda":   { "$ref": "#/definitions/subchartToggle" },
+    "clickhouse": { "$ref": "#/definitions/infraDep" },
+    "mariadb":    { "$ref": "#/definitions/infraDep" },
+    "redis":      { "$ref": "#/definitions/infraDep" },
+    "redpanda":   { "$ref": "#/definitions/infraDep" },
 
     "apiGateway": {
       "allOf": [
@@ -40,16 +47,27 @@
       ]
     },
 
-    "analyticsApi": { "$ref": "#/definitions/appService" },
-    "identity":     { "$ref": "#/definitions/appService" },
-    "frontend":     { "$ref": "#/definitions/appService" }
+    "analyticsApi":       { "$ref": "#/definitions/appService" },
+    "identityResolution": { "$ref": "#/definitions/appService" },
+    "frontend":           { "$ref": "#/definitions/appService" }
   },
 
   "definitions": {
-    "subchartToggle": {
+    "infraDep": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "deploy":   { "type": "boolean" },
+        "host":     { "type": "string" },
+        "port":     { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "database": { "type": "string" },
+        "username": { "type": "string" },
+        "passwordSecret": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "key":  { "type": "string", "minLength": 1 }
+          }
+        }
       }
     },
     "appService": {
