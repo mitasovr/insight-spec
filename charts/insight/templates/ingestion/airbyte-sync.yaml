@@ -4,6 +4,14 @@ Argo parameter references ({{inputs.parameters.foo}}, {{steps.x.outputs.result}}
 are escaped with Go-template raw-string literals (`…`) so Helm emits them
 verbatim for Argo to resolve at workflow-run time. Helm-resolved values are
 unescaped: they use `include` helpers and .Values references directly.
+
+SECURITY:
+  Argo substitutes parameter refs as LITERAL TEXT. Splicing them
+  directly into Python source enables arbitrary code execution by any
+  submitter — e.g. a crafted connection_id can become valid Python.
+  Mitigation: every workflow-time parameter is exposed to the Python
+  script via env vars (os.environ[...]); the Python source is a static,
+  parameter-free string.
 */}}
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -20,7 +28,6 @@ spec:
         parameters:
           - name: connection_id
           - name: airbyte_url
-            default: {{ include "insight.airbyte.url" . | quote }}
       steps:
         - - name: trigger
             template: trigger-sync
@@ -39,28 +46,6 @@ spec:
                 - name: airbyte_url
                   value: {{ `"{{inputs.parameters.airbyte_url}}"` }}
 
-    - name: mint-token
-      # Mints a short-lived JWT from the Airbyte JWT signing secret.
-      # Each step that needs the Airbyte API calls this inline.
-      script:
-        image: python:3.12-alpine
-        command: [python3]
-        env:
-          - name: JWT_SECRET
-            valueFrom:
-              secretKeyRef:
-                name: {{ .Values.airbyte.jwtSecret.name | quote }}
-                key:  {{ .Values.airbyte.jwtSecret.key  | quote }}
-        source: |
-          import hmac, hashlib, base64, json, time, os
-          def b64url(data):
-              return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
-          header = b64url({"alg": "HS256", "typ": "JWT"})
-          now = int(time.time())
-          payload = b64url({"iss": "airbyte-server", "sub": "00000000-0000-0000-0000-000000000000", "iat": now, "exp": now + 300})
-          sig = base64.urlsafe_b64encode(hmac.new(os.environ["JWT_SECRET"].encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
-          print(f"{header}.{payload}.{sig}")
-
     - name: trigger-sync
       inputs:
         parameters:
@@ -73,10 +58,14 @@ spec:
           - name: JWT_SECRET
             valueFrom:
               secretKeyRef:
-                name: {{ .Values.airbyte.jwtSecret.name | quote }}
-                key:  {{ .Values.airbyte.jwtSecret.key  | quote }}
+                name: {{ required "airbyte.jwtSecret.name is required" .Values.airbyte.jwtSecret.name | quote }}
+                key:  {{ required "airbyte.jwtSecret.key is required"  .Values.airbyte.jwtSecret.key  | quote }}
+          - name: CONNECTION_ID
+            value: {{ `"{{inputs.parameters.connection_id}}"` }}
+          - name: AIRBYTE_URL
+            value: {{ `"{{inputs.parameters.airbyte_url}}"` }}
         source: |
-          import urllib.request, json, sys, hmac, hashlib, base64, time, os
+          import urllib.request, urllib.error, json, sys, hmac, hashlib, base64, time, os
           def b64url(data):
               return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
           def mint_token():
@@ -85,19 +74,17 @@ spec:
               payload = b64url({"iss": "airbyte-server", "sub": "00000000-0000-0000-0000-000000000000", "iat": now, "exp": now + 300})
               sig = base64.urlsafe_b64encode(hmac.new(os.environ["JWT_SECRET"].encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
               return f"{header}.{payload}.{sig}"
-          url = {{ `"{{inputs.parameters.airbyte_url}}/api/v1/connections/sync"` }}
           token = mint_token()
           headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
-          data = json.dumps({"connectionId": {{ `"{{inputs.parameters.connection_id}}"` }}}).encode()
-          req = urllib.request.Request(url, data=data, headers=headers)
+          data = json.dumps({"connectionId": os.environ["CONNECTION_ID"]}).encode()
+          req = urllib.request.Request(f"{os.environ['AIRBYTE_URL']}/api/v1/connections/sync", data=data, headers=headers)
           try:
               resp = json.load(urllib.request.urlopen(req))
           except urllib.error.HTTPError as e:
               body = e.read().decode()
               print(f"Airbyte API error {e.code}: {body}", file=sys.stderr)
               sys.exit(1)
-          job_id = resp["job"]["id"]
-          print(job_id)
+          print(resp["job"]["id"])
 
     - name: poll-job
       inputs:
@@ -112,10 +99,14 @@ spec:
           - name: JWT_SECRET
             valueFrom:
               secretKeyRef:
-                name: {{ .Values.airbyte.jwtSecret.name | quote }}
-                key:  {{ .Values.airbyte.jwtSecret.key  | quote }}
+                name: {{ required "airbyte.jwtSecret.name is required" .Values.airbyte.jwtSecret.name | quote }}
+                key:  {{ required "airbyte.jwtSecret.key is required"  .Values.airbyte.jwtSecret.key  | quote }}
+          - name: JOB_ID
+            value: {{ `"{{inputs.parameters.job_id}}"` }}
+          - name: AIRBYTE_URL
+            value: {{ `"{{inputs.parameters.airbyte_url}}"` }}
         source: |
-          import urllib.request, json, time, sys, hmac, hashlib, base64, os
+          import urllib.request, urllib.error, json, time, sys, hmac, hashlib, base64, os
           def b64url(data):
               return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
           def mint_token():
@@ -124,16 +115,18 @@ spec:
               payload = b64url({"iss": "airbyte-server", "sub": "00000000-0000-0000-0000-000000000000", "iat": now, "exp": now + 300})
               sig = base64.urlsafe_b64encode(hmac.new(os.environ["JWT_SECRET"].encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
               return f"{header}.{payload}.{sig}"
+          job_id = int(os.environ["JOB_ID"])
+          airbyte_url = os.environ["AIRBYTE_URL"]
           while True:
               token = mint_token()
               headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
               req = urllib.request.Request(
-                  {{ `"{{inputs.parameters.airbyte_url}}/api/v1/jobs/get"` }},
-                  data=json.dumps({"id": int({{ `"{{inputs.parameters.job_id}}"` }})}).encode(),
+                  f"{airbyte_url}/api/v1/jobs/get",
+                  data=json.dumps({"id": job_id}).encode(),
                   headers=headers)
               resp = json.load(urllib.request.urlopen(req))
               status = resp["job"]["status"]
-              print(f"Job {{ `{{inputs.parameters.job_id}}` }} status: {status}", flush=True)
+              print(f"Job {job_id} status: {status}", flush=True)
               if status == "succeeded":
                   print("Sync complete")
                   sys.exit(0)

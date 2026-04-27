@@ -3,9 +3,17 @@ image:
   tag: "25.3"
   pullPolicy: IfNotPresent
 
+# NB: NO default credentials, NO default existingSecret. Operator MUST
+# wire one of:
+#   auth.existingSecret + auth.existingSecretPasswordKey
+# The umbrella does this automatically via `clickhouse.passwordSecret`,
+# which it forwards to this subchart as `auth.existingSecret`. A direct
+# install of this subchart without those values fails fast with a
+# `required` error from the StatefulSet template.
 auth:
-  username: insight
-  password: insight-local
+  username: ""
+  existingSecret: ""
+  existingSecretPasswordKey: ""
 
 persistence:
   size: 5Gi

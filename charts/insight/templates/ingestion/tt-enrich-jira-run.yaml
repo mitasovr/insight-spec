@@ -7,26 +7,25 @@ metadata:
     {{- include "insight.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingestion-template
 spec:
+  {{- with .Values.global.imagePullSecrets }}
   imagePullSecrets:
-    - name: ghcr-pull
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   entrypoint: run
   templates:
     - name: run
       inputs:
         parameters:
           - name: insight_source_id
+          - name: jira_enrich_image
           - name: clickhouse_host
-            default: {{ include "insight.clickhouse.fqdn" . | quote }}
           - name: clickhouse_port
-            default: {{ include "insight.clickhouse.port" . | quote }}
           - name: clickhouse_user
-            default: {{ .Values.clickhouse.username | default "insight" | quote }}
           - name: batch_size
-            default: "10000"
       activeDeadlineSeconds: 7200
       container:
-        image: ghcr.io/cyberfabric/insight-jira-enrich:latest
-        imagePullPolicy: Always
+        image: {{ `"{{inputs.parameters.jira_enrich_image}}"` }}
+        imagePullPolicy: IfNotPresent
         # Emissary executor can't resolve local-image entrypoints via registry,
         # so set command explicitly (matches Dockerfile ENTRYPOINT).
         command: ["/usr/local/bin/jira-enrich"]
@@ -34,8 +33,8 @@ spec:
           - name: CLICKHOUSE_PASSWORD
             valueFrom:
               secretKeyRef:
-                name: {{ .Values.clickhouse.passwordSecret.name | quote }}
-                key:  {{ .Values.clickhouse.passwordSecret.key  | quote }}
+                name: {{ required "clickhouse.passwordSecret.name is required" .Values.clickhouse.passwordSecret.name | quote }}
+                key:  {{ required "clickhouse.passwordSecret.key is required"  .Values.clickhouse.passwordSecret.key  | quote }}
           - name: RUST_LOG
             value: "info"
         args:

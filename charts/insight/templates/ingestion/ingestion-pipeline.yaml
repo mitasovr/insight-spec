@@ -10,28 +10,24 @@ spec:
   entrypoint: pipeline
   templates:
     - name: pipeline
+      # Every input parameter is REQUIRED and must be supplied by the
+      # invoker (api-gateway / cron). The chart deliberately ships no
+      # defaults so that runtime hosts, image tags and dbt selectors
+      # come from the platform ConfigMap (`{release}-platform`) and
+      # the caller's own configuration — never from chart-time defaults.
       inputs:
         parameters:
           - name: connection_id
           - name: insight_source_id
-            default: ""
-          # When `data_source=jira` the pipeline runs:
-          #   sync → dbt(tag:jira) → jira-enrich → dbt(tag:silver)
-          # For any other value only the legacy single-dbt path runs (tag:silver).
-          - name: data_source
-            default: ""
-          - name: dbt_select_staging
-            default: "tag:jira"
-          - name: dbt_select
-            default: "tag:silver"
-          - name: toolbox_image
-            default: "ghcr.io/cyberfabric/insight-toolbox:latest"
+          - name: data_source                # "jira" → enriched path; anything else → legacy single-dbt
+          - name: dbt_select_staging         # e.g. "tag:jira"
+          - name: dbt_select                 # e.g. "tag:silver"
+          - name: toolbox_image              # ghcr.io/cyberfabric/insight-toolbox:<sha or version>
+          - name: jira_enrich_image          # ghcr.io/cyberfabric/insight-jira-enrich:<sha or version>
           - name: airbyte_url
-            default: {{ include "insight.airbyte.url" . | quote }}
           - name: clickhouse_host
-            default: {{ include "insight.clickhouse.fqdn" . | quote }}
           - name: clickhouse_port
-            default: {{ include "insight.clickhouse.port" . | quote }}
+          - name: clickhouse_user
       dag:
         tasks:
           - name: sync
@@ -62,6 +58,8 @@ spec:
                   value: {{ `"{{inputs.parameters.clickhouse_host}}"` }}
                 - name: clickhouse_port
                   value: {{ `"{{inputs.parameters.clickhouse_port}}"` }}
+                - name: clickhouse_user
+                  value: {{ `"{{inputs.parameters.clickhouse_user}}"` }}
 
           - name: enrich
             depends: transform-jira-staging
@@ -73,10 +71,16 @@ spec:
               parameters:
                 - name: insight_source_id
                   value: {{ `"{{inputs.parameters.insight_source_id}}"` }}
+                - name: jira_enrich_image
+                  value: {{ `"{{inputs.parameters.jira_enrich_image}}"` }}
                 - name: clickhouse_host
                   value: {{ `"{{inputs.parameters.clickhouse_host}}"` }}
                 - name: clickhouse_port
                   value: {{ `"{{inputs.parameters.clickhouse_port}}"` }}
+                - name: clickhouse_user
+                  value: {{ `"{{inputs.parameters.clickhouse_user}}"` }}
+                - name: batch_size
+                  value: "10000"
 
           - name: transform-jira-silver
             depends: enrich
@@ -94,6 +98,8 @@ spec:
                   value: {{ `"{{inputs.parameters.clickhouse_host}}"` }}
                 - name: clickhouse_port
                   value: {{ `"{{inputs.parameters.clickhouse_port}}"` }}
+                - name: clickhouse_user
+                  value: {{ `"{{inputs.parameters.clickhouse_user}}"` }}
 
           # ------ Non-Jira: legacy single-dbt path ------
           - name: transform-legacy
@@ -112,4 +118,6 @@ spec:
                   value: {{ `"{{inputs.parameters.clickhouse_host}}"` }}
                 - name: clickhouse_port
                   value: {{ `"{{inputs.parameters.clickhouse_port}}"` }}
+                - name: clickhouse_user
+                  value: {{ `"{{inputs.parameters.clickhouse_user}}"` }}
 {{- end }}
