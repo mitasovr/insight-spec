@@ -9,7 +9,7 @@ The umbrella chart only knows the Airbyte API URL and credentials. See the `airb
 See the architecture notes for the full discussion. In short:
 - Airbyte is heavy (10+ pods) and its release cadence does not match Insight's.
 - `helm upgrade` on the umbrella must not reinstall Airbyte every time.
-- Compatibility matrix: Insight X.Y supports Airbyte 1.4.x–1.6.x — the coupling is loose.
+- Compatibility matrix: Insight 0.1.x supports Airbyte 1.8.x (pinned to 1.8.5 in the installer). The coupling is loose — ingestion templates talk to Airbyte over the stable `/api/v1/` surface, so minor-version drift is safe. Chart 1.9.x is currently skipped because it ships app 2.0.x-alpha.
 
 ## Single-namespace model
 

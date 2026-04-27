@@ -91,9 +91,15 @@ http://{{ include "insight.clickhouse.host" . }}:{{ include "insight.clickhouse.
 redis://{{ include "insight.redis.host" . }}:{{ include "insight.redis.port" . }}
 {{- end -}}
 
-{{/* ---------- Redpanda ---------- */}}
+{{/* ---------- Redpanda ----------
+     The Redpanda Helm chart exposes Kafka on two listeners:
+       - 9093 — INTERNAL (in-cluster clients connect here)
+       - 9092 — EXTERNAL (outside-cluster; goes through NodePort/LB)
+     We resolve to the internal listener by default. Override via
+     redpanda.brokers when pointing at an external cluster.
+*/}}
 {{- define "insight.redpanda.brokers" -}}
-{{- default (printf "%s-redpanda:9092" .Release.Name) .Values.redpanda.brokers -}}
+{{- default (printf "%s-redpanda:9093" .Release.Name) .Values.redpanda.brokers -}}
 {{- end -}}
 
 {{/*
@@ -130,13 +136,15 @@ Invoked from NOTES.txt so they fire on every install.
 */}}
 {{- define "insight.validate" -}}
   {{- /* OIDC: when auth is enabled, require either existingSecret or all
-         three inline fields. Partial inline config would fail at runtime
-         inside the subchart. */ -}}
-  {{- if not .Values.apiGateway.authDisabled -}}
-    {{- if not .Values.apiGateway.oidc.existingSecret -}}
-      {{- if or (not .Values.apiGateway.oidc.issuer)
-                (not .Values.apiGateway.oidc.clientId)
-                (not .Values.apiGateway.oidc.redirectUri) -}}
+         three inline fields. Defensive `default dict` guards against
+         aggressive override files that remove the whole apiGateway /
+         apiGateway.oidc block — without these, a nil-map dereference
+         would replace the fail message with a cryptic template error. */ -}}
+  {{- $gw  := default dict .Values.apiGateway -}}
+  {{- $oid := default dict $gw.oidc -}}
+  {{- if not $gw.authDisabled -}}
+    {{- if not $oid.existingSecret -}}
+      {{- if or (not $oid.issuer) (not $oid.clientId) (not $oid.redirectUri) -}}
         {{- fail "apiGateway.oidc: when existingSecret is empty and authDisabled=false, issuer AND clientId AND redirectUri are ALL required" -}}
       {{- end -}}
     {{- end -}}

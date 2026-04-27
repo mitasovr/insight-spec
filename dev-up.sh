@@ -95,8 +95,6 @@ OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-}"
 OIDC_REDIRECT_URI="${OIDC_REDIRECT_URI:-}"
 OIDC_AUDIENCE="${OIDC_AUDIENCE:-api://default}"
 
-DEPLOY_TS="$(date +%s)"
-
 # ─── Sanity ───────────────────────────────────────────────────────────────
 if [[ "$AUTH_DISABLED" != "true" && -z "$OIDC_EXISTING_SECRET" ]]; then
   : "${OIDC_ISSUER:?ERROR: OIDC_ISSUER is required — set it in $ENV_FILE or use OIDC_EXISTING_SECRET}"

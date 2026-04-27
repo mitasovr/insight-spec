@@ -271,10 +271,9 @@ apiGateway:
   authDisabled: false           # true = disable auth (LOCAL DEV ONLY)
 
   clickhouse:
-    # Left empty: the umbrella overrides at render time with the
-    # resolved URL from `insight.clickhouse.url`. See the `--set` in
-    # templates/api-gateway-extras.yaml (if introduced) or pass
-    # `--set apiGateway.clickhouse.url=<custom>` for overrides.
+    # In-cluster short DNS; single-namespace model lets us skip the
+    # `.<ns>.svc.cluster.local` suffix. To target an external CH, set
+    # clickhouse.host in the umbrella values and mirror the URL here.
     url: "http://insight-clickhouse:8123"
     database: "gold"
 

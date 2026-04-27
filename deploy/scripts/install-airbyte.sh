@@ -85,9 +85,14 @@ SETUP_ORG="${AIRBYTE_SETUP_ORG:-Insight}"
 
 if kubectl -n "$NAMESPACE" get secret airbyte-auth-secrets >/dev/null 2>&1; then
   log "Completing initial setup via API (email=$SETUP_EMAIL, org=$SETUP_ORG)"
-  # Port-forward via a temporary tunnel — don't assume a pre-existing PF.
+
+  # Temporary port-forward with a trap — under `set -euo pipefail`, any
+  # non-zero exit below would otherwise leak the PF process.
   kubectl -n "$NAMESPACE" port-forward svc/"$RELEASE"-airbyte-server-svc 18001:8001 >/dev/null 2>&1 &
   PF_PID=$!
+  # shellcheck disable=SC2064
+  trap "kill $PF_PID 2>/dev/null || true" EXIT INT TERM
+
   # Wait up to 20s for server API.
   for _ in $(seq 1 20); do
     curl -sf -o /dev/null http://localhost:18001/api/v1/instance_configuration && break
@@ -110,7 +115,9 @@ if kubectl -n "$NAMESPACE" get secret airbyte-auth-secrets >/dev/null 2>&1; then
   else
     log "Could not mint access token; skipping setup wizard (complete via UI)."
   fi
+  # Cleanup is handled by the EXIT trap above.
   kill "$PF_PID" 2>/dev/null || true
+  trap - EXIT INT TERM
 fi
 
 # ─── Summary ───────────────────────────────────────────────────────────
