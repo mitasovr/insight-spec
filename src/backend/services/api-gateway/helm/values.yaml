@@ -4,7 +4,7 @@ podAnnotations: {}
 
 image:
   repository: ghcr.io/cyberfabric/insight-api-gateway
-  tag: "latest"
+  tag: ""                # MUST be set by the operator. No `:latest` default.
   pullPolicy: IfNotPresent
 
 service:
@@ -44,16 +44,6 @@ oidc:
   redirectUri: ""         # e.g., https://insight.example.com/callback
   # jwksUrl: ""           # Override if JWKS URL differs from {issuer}/v1/keys
 
-# ClickHouse connection.
-# Empty default — when installed via the Insight umbrella, the URL is
-# computed from release name + namespace by the umbrella's
-# `insight.clickhouse.url` helper and passed through values (or through
-# the {release}-platform ConfigMap via envFrom).
-# Standalone subchart installs MUST set this explicitly.
-clickhouse:
-  url: ""
-  database: "gold"
-
 # Set to true to disable authentication (local development only)
 authDisabled: false
 
@@ -67,12 +57,12 @@ gateway:
     burst: 50
     inFlight: 32
 
-# Reverse proxy routes to downstream services
+# Reverse proxy routes. `upstream` is a templated string — `tpl` is
+# applied at chart-render time, so `{{ .Release.Name }}` resolves to
+# the actual umbrella release name. Operator can also pass a literal
+# URL to point at an external service.
 proxy:
-  routes:
-    - prefix: "/analytics"
-      upstream: "http://analytics-api-analytics-api:8081"
-      public: false
+  routes: []
 
 # Health probes
 # Provided by cyberfabric api-gateway module:

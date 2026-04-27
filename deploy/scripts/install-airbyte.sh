@@ -80,8 +80,10 @@ fi
 # away. Complete it via API so UI login works out of the box.
 #
 # Idempotent: if setup is already complete, the second call is a no-op.
-SETUP_EMAIL="${AIRBYTE_SETUP_EMAIL:-admin@example.com}"
-SETUP_ORG="${AIRBYTE_SETUP_ORG:-Insight}"
+: "${AIRBYTE_SETUP_EMAIL:?ERROR: AIRBYTE_SETUP_EMAIL is required — first-install setup wizard creates the admin user with this address}"
+: "${AIRBYTE_SETUP_ORG:?ERROR: AIRBYTE_SETUP_ORG is required — first-install setup wizard names the workspace organization with this value}"
+SETUP_EMAIL="$AIRBYTE_SETUP_EMAIL"
+SETUP_ORG="$AIRBYTE_SETUP_ORG"
 
 if kubectl -n "$NAMESPACE" get secret airbyte-auth-secrets >/dev/null 2>&1; then
   log "Completing initial setup via API (email=$SETUP_EMAIL, org=$SETUP_ORG)"

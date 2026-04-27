@@ -42,7 +42,7 @@ spec:
               containerPort: 9000
           env:
             - name: CLICKHOUSE_USER
-              value: {{ required "auth.username is required" .Values.auth.username | quote }}
+              value: {{ required "username is required" .Values.username | quote }}
             # NO `else` fallback to inline auth.password — every install MUST
             # wire an existingSecret. The umbrella does this automatically;
             # standalone installs of this subchart must set both fields.

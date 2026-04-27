@@ -3,15 +3,14 @@ image:
   tag: "25.3"
   pullPolicy: IfNotPresent
 
-# NB: NO default credentials, NO default existingSecret. Operator MUST
-# wire one of:
-#   auth.existingSecret + auth.existingSecretPasswordKey
-# The umbrella does this automatically via `clickhouse.passwordSecret`,
-# which it forwards to this subchart as `auth.existingSecret`. A direct
-# install of this subchart without those values fails fast with a
-# `required` error from the StatefulSet template.
+# Login user. NO default — operator (or umbrella) MUST set explicitly.
+username: ""
+
+# Password is sourced from a Secret. NO default — every install MUST
+# wire `auth.existingSecret` + `auth.existingSecretPasswordKey`. The
+# umbrella does this automatically via `clickhouse.passwordSecret`,
+# which it forwards to the subchart as `auth.existingSecret/Key`.
 auth:
-  username: ""
   existingSecret: ""
   existingSecretPasswordKey: ""
 

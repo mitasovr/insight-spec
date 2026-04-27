@@ -93,13 +93,14 @@ OIDC_EXISTING_SECRET="${OIDC_EXISTING_SECRET:-}"
 OIDC_ISSUER="${OIDC_ISSUER:-}"
 OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-}"
 OIDC_REDIRECT_URI="${OIDC_REDIRECT_URI:-}"
-OIDC_AUDIENCE="${OIDC_AUDIENCE:-api://default}"
+OIDC_AUDIENCE="${OIDC_AUDIENCE:-}"
 
 # ─── Sanity ───────────────────────────────────────────────────────────────
 if [[ "$AUTH_DISABLED" != "true" && -z "$OIDC_EXISTING_SECRET" ]]; then
   : "${OIDC_ISSUER:?ERROR: OIDC_ISSUER is required — set it in $ENV_FILE or use OIDC_EXISTING_SECRET}"
+  : "${OIDC_AUDIENCE:?ERROR: OIDC_AUDIENCE is required (e.g. api://insight) — set it in $ENV_FILE or use OIDC_EXISTING_SECRET}"
   : "${OIDC_CLIENT_ID:?ERROR: OIDC_CLIENT_ID is required — set it in $ENV_FILE or use OIDC_EXISTING_SECRET}"
-  OIDC_REDIRECT_URI="${OIDC_REDIRECT_URI:-http://localhost:8000/callback}"
+  : "${OIDC_REDIRECT_URI:?ERROR: OIDC_REDIRECT_URI is required — set it in $ENV_FILE or use OIDC_EXISTING_SECRET}"
 fi
 
 echo "═══════════════════════════════════════════════════════════════"
@@ -238,8 +239,10 @@ if [[ "$COMPONENT" != "ingestion" ]]; then
   # on arm64 Kind nodes (even with Rosetta, kubelet rejects manifest
   # index mismatches). A local native-arch build is reliable and matches
   # what the dev just edited.
+  # No `:latest` default — tag is the dev image_tag_for() output, which
+  # is a deterministic dev tag (`dev`, derived from commit / mtime).
   FE_REPO="${FE_IMAGE_REPOSITORY:-ghcr.io/cyberfabric/insight-front}"
-  FE_TAG="${FE_IMAGE_TAG:-latest}"
+  FE_TAG="${FE_IMAGE_TAG:-$(image_tag_for frontend)}"
   FE_IMAGE="${FE_REPO}:${FE_TAG}"
   # Locate the insight-front checkout. The committed `insight-front_symlink`
   # only resolves in the primary worktree; under .claude/worktrees/<branch>
@@ -326,8 +329,11 @@ identityResolution:
     pullPolicy: "${IMAGE_PULL_POLICY}"
 frontend:
   image:
-    repository: "${FE_REPO:-ghcr.io/cyberfabric/insight-front}"
-    tag: "${FE_TAG:-latest}"
+    # Frontend image is built from local source by build_and_load_frontend()
+    # below — repo + tag are computed from $(image_ref frontend), no
+    # `:latest` fallback (the chart `required`s tag).
+    repository: "${FE_REPO}"
+    tag: "${FE_TAG}"
     pullPolicy: "${IMAGE_PULL_POLICY}"
   ingress:
     enabled: ${INGRESS_ENABLED}
