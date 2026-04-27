@@ -179,4 +179,27 @@ Invoked from NOTES.txt so they fire on every install.
       {{- fail (printf "%s.passwordSecret.key is required" $dep) -}}
     {{- end -}}
   {{- end -}}
+
+  {{- /* BYO password hygiene. The MariaDB and Redis passwords are
+         interpolated raw into DSNs (`mysql://insight:PASS@host:3306/db`,
+         `redis://:PASS@host:6379`). Any of `@ : / ? # %` in PASS would
+         silently break URL parsing — clients see a different host or a
+         truncated password and fail at runtime, NOT at install. Auto-
+         generated values come from `randAlphaNum` and are always safe;
+         this check only fires when a pre-existing `insight-db-creds`
+         Secret is found via `lookup` (BYO / Constructor Platform path).
+         `helm template` returns nil from `lookup`, so the check is a
+         no-op during local rendering. */ -}}
+  {{- $dbSec := lookup "v1" "Secret" $.Release.Namespace "insight-db-creds" -}}
+  {{- if $dbSec -}}
+    {{- range $k := list "clickhouse-password" "mariadb-password" "mariadb-root-password" "redis-password" -}}
+      {{- $raw := index $dbSec.data $k -}}
+      {{- if $raw -}}
+        {{- $val := $raw | b64dec -}}
+        {{- if regexMatch "[@:/?#%]" $val -}}
+          {{- fail (printf "insight-db-creds.%s contains a URL-reserved character ( @ : / ? # %% ). These silently corrupt the embedded DSN — clients parse the password at the first reserved char and fail at runtime, not at install. Use a password from [A-Za-z0-9._~-] only, or delete the Secret to let the umbrella auto-generate a safe one." $k) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
 {{- end -}}

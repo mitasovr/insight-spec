@@ -343,7 +343,7 @@ Every piece of the stack that needs to reach ClickHouse / MariaDB / Redis / Redp
 
 - `cpt-insightspec-component-dep-umbrella-chart` — called by.
 - `cpt-insightspec-component-dep-platform-configmap` — calls for all entries.
-- `cpt-insightspec-component-dep-ingestion-template-bridge` — calls to resolve `__CLICKHOUSE_FQDN__`, `__CLICKHOUSE_PORT__`, `__AIRBYTE_URL__`.
+- `cpt-insightspec-component-dep-ingestion-templates` — calls helpers directly via `include`: `insight.clickhouse.fqdn`, `insight.clickhouse.port`, `insight.airbyte.url`.
 
 #### Platform ConfigMap Bridge (`platform-config.yaml`)
 
@@ -526,7 +526,7 @@ Developers iterate faster when the platform bring-up is one command. The wrapper
 | `src/backend/services/identity/helm` | Helm subchart | Optional identity-resolution stub under `identityResolution` alias. |
 | `src/frontend/helm` | Helm subchart | Mandatory SPA shipped under `frontend` alias. |
 | `helmfile/charts/clickhouse` | Helm subchart (local wrapper) | ClickHouse OLAP store. |
-| `charts/insight/files/ingestion/*.yaml` | File load via `.Files.Get` | Ingestion WorkflowTemplate sources. |
+| `charts/insight/templates/ingestion/*.yaml` | First-class Helm templates | Ingestion WorkflowTemplate sources, gated by `ingestion.templates.enabled`; consume umbrella helpers directly via `include`. |
 | `src/ingestion/airbyte-toolkit/lib/env.sh` | Read `AIRBYTE_API_URL` from the platform ConfigMap | Ingestion scripts consume Airbyte coordinates from the ConfigMap rather than hard-coding. |
 
 **Dependency Rules**:
@@ -746,5 +746,5 @@ Not applicable. The Deployment subsystem stores no data; it manipulates Kubernet
 - **ADRs**: none specific to Deployment; related decisions under `docs/domain/ingestion/specs/ADR/`.
 - **Related designs**:
   - [docs/components/backend/specs/DESIGN.md](../../backend/specs/DESIGN.md) — Backend architecture; consumes the platform ConfigMap and `credentialsSecret` references emitted by this subsystem.
-  - [docs/domain/ingestion/specs/DESIGN.md](../../../domain/ingestion/specs/DESIGN.md) — Ingestion architecture; the `WorkflowTemplate` files under `charts/insight/files/ingestion/` originate from the ingestion subsystem and are emitted by this subsystem's umbrella.
+  - [docs/domain/ingestion/specs/DESIGN.md](../../../domain/ingestion/specs/DESIGN.md) — Ingestion architecture; the `WorkflowTemplate` files under `charts/insight/templates/ingestion/` originate from the ingestion subsystem and are emitted by this subsystem's umbrella as first-class Helm templates.
   - [docs/components/airbyte-toolkit/specs/DESIGN.md](../../airbyte-toolkit/specs/DESIGN.md) — Toolkit that consumes `AIRBYTE_API_URL` and the JWT Secret from the platform ConfigMap.

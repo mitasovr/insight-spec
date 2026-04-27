@@ -422,10 +422,12 @@ secret_value() {
   kubectl -n "$NAMESPACE" get secret "$1" -o jsonpath="{.data.$2}" 2>/dev/null | base64 -d 2>/dev/null || true
 }
 
-CH_PASS=$(secret_value "${INSIGHT_RELEASE:-insight}-db-creds" clickhouse-password)
-MDB_PASS=$(secret_value "${INSIGHT_RELEASE:-insight}-db-creds" mariadb-password)
-MDB_ROOT=$(secret_value "${INSIGHT_RELEASE:-insight}-db-creds" mariadb-root-password)
-REDIS_PASS=$(secret_value "${INSIGHT_RELEASE:-insight}-db-creds" redis-password)
+# NB: chart emits a FIXED Secret name (`insight-db-creds`) regardless of
+# the umbrella release name — there is one Insight install per namespace.
+CH_PASS=$(secret_value insight-db-creds clickhouse-password)
+MDB_PASS=$(secret_value insight-db-creds mariadb-password)
+MDB_ROOT=$(secret_value insight-db-creds mariadb-root-password)
+REDIS_PASS=$(secret_value insight-db-creds redis-password)
 AB_PASS=$(secret_value airbyte-auth-secrets instance-admin-password)
 
 # ─── Summary ──────────────────────────────────────────────────────────────
@@ -459,5 +461,5 @@ echo "  ────────────────────────
 [[ -n "$REDIS_PASS" ]] && echo "  Redis    default             / $REDIS_PASS"
 echo ""
 echo "  (passwords auto-generated on first install, stored in Secret"
-echo "   '${INSIGHT_RELEASE:-insight}-db-creds' — stable across upgrades.)"
+echo "   'insight-db-creds' — stable across upgrades.)"
 echo "═══════════════════════════════════════════════════════════════"

@@ -64,7 +64,7 @@ The third driver is reproducibility for the development team itself: a developer
 ### 1.3 Goals (Business Outcomes)
 
 - Reduce the time from "clean Kubernetes cluster" to "Insight UI reachable" to under 30 minutes for a customer SRE following the canonical installer, measured end-to-end on a fresh Kind or managed cluster.
-- Enable Constructor Platform onboarding by allowing each infra dependency to be flipped from bundled to external via a single `enabled: false` + `external:` block, so a shared-platform tenant install reuses the platform's ClickHouse / MariaDB / Redpanda without code changes.
+- Enable Constructor Platform onboarding by allowing each infra dependency to be flipped from bundled to external via a single `<dep>.deploy: false` toggle plus the same flat `host` / `port` / `passwordSecret` fields the bundled mode reads, so a shared-platform tenant install reuses the platform's ClickHouse / MariaDB / Redpanda without code changes.
 - Ship a single `Application` (App-of-Apps) manifest that enterprise ArgoCD users apply once to reconcile the entire stack, so upgrade = git commit.
 - Keep developer inner-loop under 10 minutes from `dev-up.sh` to a usable cluster with locally built images, so platform changes can be tested against a realistic topology before review.
 - Prevent accidental shipping of default passwords or placeholder secrets by failing `helm install` fast when credentials are empty and no external Secret is declared.
@@ -99,7 +99,7 @@ The third driver is reproducibility for the development team itself: a developer
 **ID**: `cpt-insightspec-actor-platform-operator`
 
 **Role**: Internal operator who onboards Insight as a tenant of the Constructor Platform, wiring it to the shared ClickHouse / MariaDB / Redpanda.
-**Needs**: Per-infra enabled-flags, an `external:` block that accepts host + port + credentials Secret for every bundled dependency, and a validator that fails fast when any of those are missing.
+**Needs**: Per-infra `deploy` flags plus a single flat block (`host`, `port`, `database`, `username`, `passwordSecret`) that the chart reads identically whether the dependency is bundled or external, and a validator that fails fast when any of those are missing.
 
 #### Enterprise ArgoCD Administrator
 
@@ -173,7 +173,7 @@ The third driver is reproducibility for the development team itself: a developer
 - The Insight umbrella Helm chart at `charts/insight/` with eight declared dependencies (ClickHouse, MariaDB, Redis, Redpanda, API Gateway, Analytics API, Frontend, Identity Resolution).
 - The service-resolution helper library (`templates/_helpers.tpl`) that returns the same values whether a dependency is bundled or external, and the `insight.validate` template that fails rendering on missing required fields.
 - The single `{release}-platform` ConfigMap that exposes resolved infra coordinates to every pod in the namespace via `envFrom`.
-- Argo `WorkflowTemplate` emission (`templates/ingestion-templates.yaml`) from raw files under `charts/insight/files/ingestion/` using placeholder substitution.
+- Argo `WorkflowTemplate` emission as first-class Helm templates under `charts/insight/templates/ingestion/*.yaml`, gated by `ingestion.templates.enabled` and consuming umbrella helpers (`insight.clickhouse.fqdn`, `insight.airbyte.url`, …) directly via `include`.
 - Airbyte bring-up assets: pinned chart version 1.8.5 + app 1.8.5, curated values file under `deploy/airbyte/`, installer script that completes the setup wizard via API.
 - Argo Workflows bring-up assets: pinned chart version, curated values, supplemental RBAC with placeholder substitution, installer that configures `controller.instanceID` and `workflowNamespaces` per install.
 - Orchestrator installer `deploy/scripts/install.sh` (Airbyte → Argo → Insight) with per-step skip flags.
@@ -252,7 +252,7 @@ The umbrella chart **MUST** render a single ConfigMap named `{release}-platform`
 
 - [ ] `p1` - **ID**: `cpt-insightspec-fr-dep-external-mode`
 
-Each infrastructure dependency in the umbrella (ClickHouse, MariaDB, Redis, Redpanda) **MUST** expose an `enabled: true/false` switch and an `external:` block accepting at minimum host, port and a reference to a pre-existing Secret holding credentials, so that the same umbrella chart can either install the dependency bundled or consume a platform-provided external instance.
+Each infrastructure dependency in the umbrella (ClickHouse, MariaDB, Redis, Redpanda) **MUST** expose a single unified shape — `<dep>.deploy: true/false` plus flat `host` / `port` / (where applicable) `database` / `username` / `passwordSecret.{name,key}` — read identically by consumers whether the dependency is bundled (umbrella runs the subchart) or external (umbrella does not run the subchart and the operator points the same fields at a platform-provided instance).
 
 **Rationale**: Constructor Platform tenant installs must reuse the platform's shared ClickHouse / MariaDB / Redpanda — the umbrella cannot assume every install bundles its own.
 
@@ -446,7 +446,7 @@ Two Insight installs on the same Kubernetes cluster in different namespaces **MU
 
 - [ ] `p1` - **ID**: `cpt-insightspec-nfr-dep-fail-fast`
 
-An install that is missing any of the following **MUST** abort during `helm template` or `helm install` with a human-readable message that names the missing field: external-mode host / port / credentials Secret for any infra with `enabled: false`; bundled-infra password for any infra with `enabled: true`; partially-configured OIDC (some but not all of issuer / clientId / redirectUri) when `apiGateway.authDisabled: false`.
+An install that is missing any of the following **MUST** abort during `helm template` or `helm install` with a human-readable message that names the missing field: `<dep>.host` for any infra with `<dep>.deploy: false`; `<dep>.passwordSecret.{name,key}` for any infra; for BYO mode, any required key in a pre-existing `insight-db-creds` Secret that is missing or empty (and, as a hardening, any password containing URL-reserved characters that would silently corrupt embedded DSNs); partially-configured OIDC (some but not all of `issuer` / `clientId` / `redirectUri`) when `apiGateway.authDisabled: false`.
 
 **Threshold**: zero installs that reach the cluster with a missing required field; every such install aborted at render time.
 
@@ -477,7 +477,7 @@ An install that is missing any of the following **MUST** abort during `helm temp
 
 **Stability**: unstable (pre-1.0 while the chart is at `version: 0.1.0`).
 
-**Description**: The values contract that customers and GitOps overlays target. It covers the `global` block, the four infra blocks (ClickHouse, MariaDB, Redis, Redpanda) each with `enabled` / `external` / `auth` sub-blocks, the four app-service blocks (apiGateway, analyticsApi, frontend, identityResolution), and the `airbyte` + `ingestion.templates` blocks.
+**Description**: The values contract that customers and GitOps overlays target. It covers the `credentials` block (`autoGenerate`), the `global` block, the four infra blocks (ClickHouse, MariaDB, Redis, Redpanda) each with the unified flat shape (`deploy`, `host`, `port`, `database`, `username`, `passwordSecret`), the three mandatory app-service blocks (apiGateway, analyticsApi, frontend) plus the optional `identityResolution` (`deploy`-gated), and the `airbyte` + `ingestion.templates` blocks.
 
 **Breaking Change Policy**: minor version bump for additive fields; major version bump for removed or renamed values keys; the validator output must name any newly required field.
 
