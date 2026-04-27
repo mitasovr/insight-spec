@@ -125,7 +125,11 @@ if [[ "$CLUSTER_MODE" == "local" ]]; then
   elif ! docker ps --format '{{.Names}}' | grep -q "^${CLUSTER_NAME}-control-plane$"; then
     echo "=== Starting Kind cluster ==="
     docker start "${CLUSTER_NAME}-control-plane"
-    sleep 5
+    # Wait for control plane to actually be Ready instead of a fixed sleep —
+    # flaky on slow machines, wasteful on fast ones.
+    kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${HOME}/.kube/insight.kubeconfig" 2>/dev/null || true
+    KUBECONFIG="${HOME}/.kube/insight.kubeconfig" \
+      kubectl wait --for=condition=Ready node --all --timeout=60s
   fi
   kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${KUBECONFIG_PATH}" 2>/dev/null || true
   export KUBECONFIG="${KUBECONFIG_PATH}"
@@ -394,13 +398,16 @@ esac
 # ─── Port-forwards (local only) ────────────────────────────────────────
 # Every service that a developer would want to hit gets a local port.
 # All subcharts live in the release namespace, so one loop is enough.
+PF_PIDS=()
 if [[ "$CLUSTER_MODE" == "local" ]]; then
   echo "=== Starting port-forwards ==="
-  pkill -f "port-forward.*-n $NAMESPACE" 2>/dev/null || true
-  sleep 1
-
+  # Track the PIDs of the port-forwards we spawn so we can stop only
+  # those — `pkill -f port-forward.*-n $NAMESPACE` matches any kubectl
+  # port-forward whose argv mentions the namespace, including unrelated
+  # PFs the developer may have started in another terminal.
   pf() { # svc host-port:svc-port
     kubectl -n "$NAMESPACE" port-forward "svc/$1" "$2" >/dev/null 2>&1 &
+    PF_PIDS+=("$!")
   }
 
   # Stack UI / API (umbrella)
@@ -417,6 +424,7 @@ if [[ "$CLUSTER_MODE" == "local" ]]; then
   # Argo Workflows UI (chart's server SVC)
   pf argo-workflows-server         2746:2746
 
+  echo "  (port-forward PIDs: ${PF_PIDS[*]} — kill with \`kill ${PF_PIDS[*]}\`)"
   sleep 2
 fi
 
@@ -460,11 +468,20 @@ fi
 echo ""
 echo "  Credentials"
 echo "  ───────────────────────────────────────────────────────────"
-[[ -n "$AB_PASS" ]]    && echo "  Airbyte  admin@example.com  / $AB_PASS"
-[[ -n "$CH_PASS" ]]    && echo "  CH       insight             / $CH_PASS"
-[[ -n "$MDB_PASS" ]]   && echo "  MariaDB  insight             / $MDB_PASS"
-[[ -n "$MDB_ROOT" ]]   && echo "  MariaDB  root                / $MDB_ROOT"
-[[ -n "$REDIS_PASS" ]] && echo "  Redis    default             / $REDIS_PASS"
+if [[ "$CLUSTER_MODE" == "local" || "${SHOW_CREDS:-}" == "1" ]]; then
+  [[ -n "$AB_PASS" ]]    && echo "  Airbyte  ${AIRBYTE_SETUP_EMAIL:-admin}  / $AB_PASS"
+  [[ -n "$CH_PASS" ]]    && echo "  CH       insight             / $CH_PASS"
+  [[ -n "$MDB_PASS" ]]   && echo "  MariaDB  insight             / $MDB_PASS"
+  [[ -n "$MDB_ROOT" ]]   && echo "  MariaDB  root                / $MDB_ROOT"
+  [[ -n "$REDIS_PASS" ]] && echo "  Redis    default             / $REDIS_PASS"
+else
+  # For remote envs (virtuozzo, prod-like) — DO NOT dump passwords into
+  # the developer's terminal scrollback. Print only how to fetch them.
+  echo "  (remote cluster — passwords not printed; pass SHOW_CREDS=1 to override)"
+  echo "  Fetch with:"
+  echo "    kubectl -n ${NAMESPACE} get secret insight-db-creds -o yaml"
+  echo "    kubectl -n ${NAMESPACE} get secret airbyte-auth-secrets -o jsonpath='{.data.instance-admin-password}' | base64 -d"
+fi
 echo ""
 echo "  (passwords auto-generated on first install, stored in Secret"
 echo "   'insight-db-creds' — stable across upgrades.)"

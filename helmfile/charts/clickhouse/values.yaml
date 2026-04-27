@@ -3,6 +3,11 @@ image:
   tag: "25.3"
   pullPolicy: IfNotPresent
 
+# Databases to create on first boot. Connector-agnostic — operator (or
+# umbrella) supplies the list. Additional bronze schemas beyond this
+# list are created lazily by the ingestion pipelines themselves.
+initDatabases: []
+
 # Login user. NO default — operator (or umbrella) MUST set explicitly.
 username: ""
 

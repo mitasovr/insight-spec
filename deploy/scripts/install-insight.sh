@@ -42,8 +42,10 @@ case "$CHART_SOURCE" in
     [[ -f "$CHART_REF/Chart.yaml" ]] || die "local chart not found: $CHART_REF"
     log "Ensuring subchart dependencies"
     helm dependency update "$CHART_REF" >/dev/null
-    # Auto-detect version if not set
-    VERSION="${INSIGHT_VERSION:-$(grep '^version:' "$CHART_REF/Chart.yaml" | awk '{print $2}')}"
+    # Auto-detect version if not set. Prefer `helm show chart` over
+    # `grep ^version: + awk` so a stray top-level `version:` block
+    # (migration notes, comments, schema docs) doesn't trip us up.
+    VERSION="${INSIGHT_VERSION:-$(helm show chart "$CHART_REF" | awk '/^version:/ {print $2; exit}')}"
     VERSION_ARG=()
     ;;
   oci)
@@ -86,11 +88,25 @@ _check_svc "Argo Workflows" "argo-workflows-server" \
 # has `clickhouse.deploy=true` (the default), the umbrella installs
 # those itself. If they are set to `deploy: false`, a warning here
 # catches missing external dependencies BEFORE helm upgrade runs.
-for dep in insight-clickhouse insight-mariadb insight-redis-master; do
+for dep in "$RELEASE-clickhouse" "$RELEASE-mariadb" "$RELEASE-redis-master"; do
   if ! kubectl -n "$NAMESPACE" get svc "$dep" >/dev/null 2>&1; then
     log "Note: $dep not present — umbrella will provision it (if <dep>.deploy=true)."
   fi
 done
+
+# Argo CRD guard. The umbrella's `ingestion.templates.enabled: true`
+# default emits `WorkflowTemplate` resources. On a cluster without
+# Argo Workflows CRDs (e.g. SKIP_ARGO=1, or this installer run without
+# `install-argo.sh` first) `helm install` would fail with
+# `no matches for kind "WorkflowTemplate"`. dev-up.sh handles this via
+# its own guard — replicate the auto-disable here so the canonical
+# installer is equally robust.
+ARGO_CRD_DISABLE_ARGS=()
+if ! kubectl get crd workflowtemplates.argoproj.io >/dev/null 2>&1; then
+  log "WARNING: workflowtemplates.argoproj.io CRD missing — auto-disabling ingestion.templates.enabled"
+  log "         Run install-argo.sh to register CRDs, then re-run install-insight.sh to enable templates."
+  ARGO_CRD_DISABLE_ARGS=(--set ingestion.templates.enabled=false)
+fi
 
 # ─── Install / upgrade ─────────────────────────────────────────────────
 VALUES_ARGS=()
@@ -104,10 +120,19 @@ if [[ -n "$EXTRA_VALUES_FILES" ]]; then
 fi
 [[ -n "$EXTRA_VALUES" ]] && VALUES_ARGS+=(-f "$EXTRA_VALUES")
 
-# HELM_EXTRA_ARGS: caller-supplied passthrough (e.g. --set flags). Split
-# on whitespace — caller is responsible for not embedding spaces.
+# HELM_EXTRA_ARGS: caller-supplied passthrough (e.g. --set flags).
+# Split on whitespace — caller is responsible for not embedding
+# whitespace inside individual arg values. To pass quoted arguments
+# safely, set HELM_EXTRA_ARGS_FILE to a path with one arg per line:
+#   HELM_EXTRA_ARGS_FILE=/tmp/args ./install-insight.sh
 EXTRA_ARGS=()
-if [[ -n "${HELM_EXTRA_ARGS:-}" ]]; then
+if [[ -n "${HELM_EXTRA_ARGS_FILE:-}" ]]; then
+  [[ -f "$HELM_EXTRA_ARGS_FILE" ]] || die "HELM_EXTRA_ARGS_FILE not found: $HELM_EXTRA_ARGS_FILE"
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    EXTRA_ARGS+=("$line")
+  done < "$HELM_EXTRA_ARGS_FILE"
+elif [[ -n "${HELM_EXTRA_ARGS:-}" ]]; then
   # shellcheck disable=SC2206
   EXTRA_ARGS=($HELM_EXTRA_ARGS)
 fi
@@ -117,6 +142,7 @@ helm upgrade --install "$RELEASE" "$CHART_REF" \
   --namespace "$NAMESPACE" --create-namespace \
   "${VERSION_ARG[@]}" \
   "${VALUES_ARGS[@]}" \
+  "${ARGO_CRD_DISABLE_ARGS[@]}" \
   "${EXTRA_ARGS[@]}" \
   --wait --timeout 10m
 

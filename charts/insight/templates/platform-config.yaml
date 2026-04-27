@@ -1,3 +1,8 @@
+{{- /*
+Anchor `insight.validate` in a normal template so it runs under
+`helm lint` (which does not render NOTES.txt). The validator emits
+no output on success — `fail`s on missing required fields. */ -}}
+{{- include "insight.validate" . }}
 {{/*
 Single ConfigMap that exposes all resolved infra coordinates.
 

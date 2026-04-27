@@ -4,10 +4,10 @@ Mounted at /docker-entrypoint-initdb.d/ — the upstream image runs
 every .sql / .sh file there after the server boots, and writes a
 marker file so subsequent restarts skip the scripts.
 
-Creates the `insight` database that the app services and ingestion
-dbt models expect. Additional per-source bronze databases
-(bronze_bamboohr, bronze_slack, etc.) are created lazily by the
-ingestion pipelines themselves.
+Databases to create on first boot are values-driven via
+`initDatabases` so the chart stays connector-agnostic. Additional
+per-source bronze databases beyond the configured list are created
+lazily by the ingestion pipelines themselves.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -16,6 +16,7 @@ metadata:
   labels:
     {{- include "clickhouse.labels" . | nindent 4 }}
 data:
-  001-insight-db.sql: |
-    CREATE DATABASE IF NOT EXISTS insight;
-    CREATE DATABASE IF NOT EXISTS bronze_bamboohr;
+  001-databases.sql: |
+    {{- range .Values.initDatabases }}
+    CREATE DATABASE IF NOT EXISTS {{ . }};
+    {{- end }}

@@ -88,28 +88,32 @@ SETUP_ORG="$AIRBYTE_SETUP_ORG"
 if kubectl -n "$NAMESPACE" get secret airbyte-auth-secrets >/dev/null 2>&1; then
   log "Completing initial setup via API (email=$SETUP_EMAIL, org=$SETUP_ORG)"
 
+  # Pick a free local port dynamically — hardcoded 18001 collides with
+  # any other tool the developer may have on that port.
+  PF_LOCAL_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1])')
+
   # Temporary port-forward with a trap — under `set -euo pipefail`, any
   # non-zero exit below would otherwise leak the PF process.
-  kubectl -n "$NAMESPACE" port-forward svc/"$RELEASE"-airbyte-server-svc 18001:8001 >/dev/null 2>&1 &
+  kubectl -n "$NAMESPACE" port-forward svc/"$RELEASE"-airbyte-server-svc "$PF_LOCAL_PORT:8001" >/dev/null 2>&1 &
   PF_PID=$!
   # shellcheck disable=SC2064
   trap "kill $PF_PID 2>/dev/null || true" EXIT INT TERM
 
   # Wait up to 20s for server API.
   for _ in $(seq 1 20); do
-    curl -sf -o /dev/null http://localhost:18001/api/v1/instance_configuration && break
+    curl -sf -o /dev/null "http://localhost:$PF_LOCAL_PORT/api/v1/instance_configuration" && break
     sleep 1
   done
 
   CID=$(kubectl -n "$NAMESPACE" get secret airbyte-auth-secrets -o jsonpath='{.data.instance-admin-client-id}' | base64 -d)
   CSEC=$(kubectl -n "$NAMESPACE" get secret airbyte-auth-secrets -o jsonpath='{.data.instance-admin-client-secret}' | base64 -d)
-  TOKEN=$(curl -sf -X POST http://localhost:18001/api/v1/applications/token \
+  TOKEN=$(curl -sf -X POST "http://localhost:$PF_LOCAL_PORT/api/v1/applications/token" \
     -H "Content-Type: application/json" \
     -d "{\"client_id\":\"$CID\",\"client_secret\":\"$CSEC\"}" -m 10 \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null || true)
 
   if [[ -n "$TOKEN" ]]; then
-    curl -sf -X POST http://localhost:18001/api/v1/instance_configuration/setup \
+    curl -sf -X POST "http://localhost:$PF_LOCAL_PORT/api/v1/instance_configuration/setup" \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $TOKEN" \
       -d "{\"email\":\"$SETUP_EMAIL\",\"organizationName\":\"$SETUP_ORG\",\"initialSetupComplete\":true,\"anonymousDataCollection\":false,\"news\":false,\"securityUpdates\":false}" \

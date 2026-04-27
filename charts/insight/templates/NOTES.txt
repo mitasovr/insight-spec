@@ -48,10 +48,10 @@ Next steps:
 
 {{- if .Values.credentials.autoGenerate }}
 
-Auto-generated DB credentials (stored in Secret {{ .Release.Name }}-db-creds):
+Auto-generated DB credentials (stored in Secret insight-db-creds — fixed name):
 
-  ClickHouse:       kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-db-creds -o jsonpath='{.data.clickhouse-password}' | base64 -d
-  MariaDB user:     kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-db-creds -o jsonpath='{.data.mariadb-password}' | base64 -d
-  MariaDB root:     kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-db-creds -o jsonpath='{.data.mariadb-root-password}' | base64 -d
-  Redis:            kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-db-creds -o jsonpath='{.data.redis-password}' | base64 -d
+  ClickHouse:       kubectl -n {{ .Release.Namespace }} get secret insight-db-creds -o jsonpath='{.data.clickhouse-password}' | base64 -d
+  MariaDB user:     kubectl -n {{ .Release.Namespace }} get secret insight-db-creds -o jsonpath='{.data.mariadb-password}' | base64 -d
+  MariaDB root:     kubectl -n {{ .Release.Namespace }} get secret insight-db-creds -o jsonpath='{.data.mariadb-root-password}' | base64 -d
+  Redis:            kubectl -n {{ .Release.Namespace }} get secret insight-db-creds -o jsonpath='{.data.redis-password}' | base64 -d
 {{- end }}

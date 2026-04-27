@@ -2,12 +2,15 @@
 ## Argo Workflows — curated values for Insight.
 ##
 ## Applied to the argo/argo-workflows chart.
-## Installed as a standalone Helm release in namespace 'argo'
-## (separate release like Airbyte, for the same lifecycle reasons).
+## Installed as a standalone Helm release in the SAME namespace as the
+## Insight umbrella (default `insight`, override via INSIGHT_NAMESPACE).
+## Separate release like Airbyte, for the same lifecycle reasons —
+## Argo Workflows has its own release cadence and CRD schema; we don't
+## want `helm upgrade` on the Insight umbrella to re-roll Argo every time.
 ##
-## Insight services submit Workflow/CronWorkflow objects in the 'insight'
-## namespace, using the WorkflowTemplates shipped by the umbrella chart,
-## or call the Argo server API directly.
+## Insight services submit Workflow / CronWorkflow objects in the same
+## release namespace, using the WorkflowTemplates shipped by the umbrella
+## chart, or call the Argo server API directly.
 ##
 
 server:

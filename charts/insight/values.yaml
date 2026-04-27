@@ -144,6 +144,12 @@ clickhouse:
   image:
     repository: clickhouse/clickhouse-server
     tag: ""                     # MUST be set (CH version pin, e.g. "25.3")
+  # Databases the CH wrapper creates on first boot via
+  # /docker-entrypoint-initdb.d/. Connector-specific bronze schemas
+  # (bronze_jira, bronze_slack, …) are created by ingestion pipelines
+  # themselves; only schemas required at startup live here.
+  initDatabases:
+    - insight
   persistence:
     size: 10Gi
   resources:
