@@ -248,11 +248,12 @@ SELECT
     toFloat64(ifNull(e.sent_count, 0))            AS metric_value
 FROM silver.class_collab_email_activity AS e
 LEFT JOIN insight.people AS p ON lower(e.email) = p.person_id
+WHERE e.data_source = 'insight_m365'
 
 UNION ALL
 SELECT
     lower(m.email), p.org_unit_id, toString(m.date), 'zoom_calls',
-    toFloat64(ifNull(m.meetings_attended, 0))
+    toFloat64(ifNull(m.calls_count, 0))
 FROM silver.class_collab_meeting_activity AS m
 LEFT JOIN insight.people AS p ON lower(m.email) = p.person_id
 WHERE m.data_source = 'insight_zoom'
@@ -279,6 +280,7 @@ SELECT
     toFloat64(ifNull(d.shared_externally_count, 0))
 FROM silver.class_collab_document_activity AS d
 LEFT JOIN insight.people AS p ON lower(d.email) = p.person_id
+WHERE d.data_source = 'insight_m365'
 
 UNION ALL
 SELECT
@@ -380,7 +382,7 @@ LEFT JOIN insight.people AS p ON lower(c.email) = p.person_id
 UNION ALL
 SELECT
     lower(c.email), p.org_unit_id, c.day, 'cursor_completions',
-    toFloat64(coalesce(c.tool_use_offered, 0))
+    toFloat64(coalesce(c.completions_count, 0))
 FROM silver.class_ai_dev_usage AS c
 LEFT JOIN insight.people AS p ON lower(c.email) = p.person_id
 UNION ALL
@@ -509,7 +511,7 @@ LEFT JOIN (
         avg(if(toFloat64(coalesce(c.total_lines_added, 0)) > 0,
                (toFloat64(coalesce(c.lines_added, 0)) /
                 toFloat64(c.total_lines_added)) * 100,
-               0))                    AS avg_ai_loc_share
+               CAST(NULL AS Nullable(Float64)))) AS avg_ai_loc_share
     FROM silver.class_ai_dev_usage AS c
     INNER JOIN insight.people AS pe
         ON (lower(c.email) = pe.person_id) AND (pe.status = 'Active')
@@ -572,7 +574,7 @@ LEFT JOIN (
         if(toFloat64(coalesce(total_lines_added, 0)) > 0,
            round((toFloat64(coalesce(lines_added, 0)) /
                   toFloat64(total_lines_added)) * 100, 1),
-           0)                     AS ai_loc_share_pct
+           CAST(NULL AS Nullable(Float64))) AS ai_loc_share_pct
     FROM silver.class_ai_dev_usage
 ) AS cur ON (p.person_id = cur.email) AND (f.metric_date = cur.metric_date)
 WHERE p.status = 'Active';
@@ -626,7 +628,7 @@ LEFT JOIN (
         if(toFloat64(coalesce(total_lines_added, 0)) > 0,
            round((toFloat64(coalesce(lines_added, 0)) /
                   toFloat64(total_lines_added)) * 100, 1),
-           0)                                     AS ai_loc_share_pct,
+           CAST(NULL AS Nullable(Float64)))       AS ai_loc_share_pct,
         toFloat64(coalesce(agent_sessions, 0))
             + toFloat64(coalesce(chat_requests, 0))
                                                   AS ai_sessions
