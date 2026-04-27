@@ -31,7 +31,7 @@ date: 2026-04-23
 
 The Deployment subsystem is a three-layer distribution pipeline. Layer one is a set of artifacts: the Insight umbrella Helm chart, the two engine dependencies (Airbyte and Argo Workflows) pinned by version, and the application service images. Layer two is the canonical installer — four shell scripts that drive `helm upgrade --install` against a target namespace in a deterministic Airbyte → Argo → Insight order, with idempotent re-runs and per-step skip flags. Layer three is the developer wrapper `dev-up.sh` that wraps the canonical installer with image-build, Kind bootstrap and port-forward concerns so that a contributor can reach a running stack from a fresh checkout in one command.
 
-All three layers converge on the same umbrella chart and the same curated values files, so imperative (customer SRE), declarative (enterprise ArgoCD) and developer paths render identical Kubernetes manifests. The umbrella is deliberately thin: it does not own CRDs or controllers; it orchestrates subcharts and emits one bridge object (`{release}-platform` ConfigMap) plus Argo `WorkflowTemplate` objects. Every infra dependency is pluggable — `enabled: true` installs the subchart, `enabled: false` consumes an externally-provided instance via a declared `external:` block. A fail-fast validator enforces the contract at render time.
+All three layers converge on the same umbrella chart and the same curated values files, so imperative (customer SRE), declarative (enterprise ArgoCD) and developer paths render identical Kubernetes manifests. The umbrella is deliberately thin: it does not own CRDs or controllers; it orchestrates subcharts and emits one bridge object (`{release}-platform` ConfigMap) plus Argo `WorkflowTemplate` objects. Every infra dependency is pluggable — `<dep>.deploy: true` installs the bundled subchart, `<dep>.deploy: false` skips it and lets consumers point at an externally-provided instance via the same flat `<dep>.host` / `.port` / `.passwordSecret` shape used in either mode. A fail-fast validator enforces the contract at render time.
 
 The subsystem is designed around a single-namespace deployment model: Airbyte, Argo Workflows and the umbrella are three separate Helm releases that all target the same Kubernetes namespace. Tenant separation on a shared cluster is achieved by choosing distinct namespaces, with `controller.instanceID` scoping Argo workflows per install. This trades flexibility (no cross-namespace DNS) for simplicity (no cross-namespace RBAC, no secret mirroring, one axis of isolation to reason about).
 
@@ -43,12 +43,12 @@ The subsystem is designed around a single-namespace deployment model: Airbyte, A
 
 | Requirement | Design Response |
 |-------------|-----------------|
-| `cpt-insightspec-fr-dep-umbrella-chart` | Umbrella chart `charts/insight/` with eight declared dependencies in `Chart.yaml` (four infra subcharts with `condition: <alias>.enabled` + four app-service subcharts, of which identity-resolution is the only one gated). Chart renders through a single `helm install`. |
-| `cpt-insightspec-fr-dep-mandatory-apps` | API Gateway, Analytics API and Frontend are declared without a `condition:` in `Chart.yaml`; only Identity Resolution carries `condition: identityResolution.enabled`. |
-| `cpt-insightspec-fr-dep-optional-identity-resolution` | `identityResolution.enabled: false` is the default in `values.yaml`; subchart renders only when explicitly enabled. |
-| `cpt-insightspec-fr-dep-ingestion-templates` | `templates/ingestion-templates.yaml` ranges over `files/ingestion/*.yaml` via `.Files.Get` and substitutes `__CLICKHOUSE_FQDN__`, `__CLICKHOUSE_PORT__`, `__AIRBYTE_URL__` placeholders; gated by `ingestion.templates.enabled`. |
+| `cpt-insightspec-fr-dep-umbrella-chart` | Umbrella chart `charts/insight/` with eight declared dependencies in `Chart.yaml` (four infra subcharts with `condition: <alias>.deploy` + four app-service subcharts, of which identity-resolution is the only one gated). Chart renders through a single `helm install`. |
+| `cpt-insightspec-fr-dep-mandatory-apps` | API Gateway, Analytics API and Frontend are declared without a `condition:` in `Chart.yaml`; only Identity Resolution carries `condition: identityResolution.deploy`. |
+| `cpt-insightspec-fr-dep-optional-identity-resolution` | `identityResolution.deploy: false` is the default in `values.yaml`; subchart renders only when explicitly enabled. |
+| `cpt-insightspec-fr-dep-ingestion-templates` | `templates/ingestion/*.yaml` are first-class Helm templates that consume the umbrella's named helpers (`insight.clickhouse.fqdn`, `insight.airbyte.url`, …) directly. Argo expression syntax is escaped with backticks to survive Helm templating. Gated by `ingestion.templates.enabled`. |
 | `cpt-insightspec-fr-dep-platform-configmap` | `templates/platform-config.yaml` emits a single ConfigMap named `{release}-platform`; every pod in the namespace can consume it via `envFrom`. |
-| `cpt-insightspec-fr-dep-external-mode` | Each infra block in `values.yaml` has `enabled` + `external:` (host/port/credentialsSecret); the `Chart.yaml` dependency carries `condition: <alias>.enabled`. |
+| `cpt-insightspec-fr-dep-external-mode` | Each infra block in `values.yaml` has the SAME unified shape (`<dep>.deploy`, `<dep>.host`, `<dep>.port`, `<dep>.passwordSecret`); `<dep>.deploy: false` skips the bundled subchart but consumers still read the same fields. The `Chart.yaml` dependency carries `condition: <alias>.deploy`. |
 | `cpt-insightspec-fr-dep-fail-fast-validation` | `insight.validate` template in `_helpers.tpl` — invoked from `NOTES.txt` on every install — calls `fail` on missing required fields across OIDC, external-mode infra, and bundled-infra passwords. |
 | `cpt-insightspec-fr-dep-service-resolution-helpers` | Named helpers per dependency (`insight.clickhouse.host/port/fqdn/url`, `insight.mariadb.*`, `insight.redis.*`, `insight.redpanda.brokers`, `insight.airbyte.url`, app-service host helpers) return internal DNS when bundled, external host verbatim otherwise, without appending the cluster suffix to an external hostname. |
 | `cpt-insightspec-fr-dep-canonical-installer` | `deploy/scripts/install.sh` orchestrator calls the three step scripts in order and honours `SKIP_AIRBYTE` / `SKIP_ARGO` / `SKIP_INSIGHT` flags. |
@@ -62,7 +62,7 @@ The subsystem is designed around a single-namespace deployment model: Airbyte, A
 | `cpt-insightspec-fr-dep-dev-wrapper` | `dev-up.sh` scripts the Kind bootstrap, backend image builds + `kind load`, frontend build from `insight-front_symlink` with arch-aware fallback, applies `deploy/values-dev.yaml` via `INSIGHT_VALUES_FILES`, and opens the documented port-forwards. |
 | `cpt-insightspec-fr-dep-dev-namespace-param` | `dev-up.sh`, `dev-down.sh` and `init.sh` read `INSIGHT_NAMESPACE` (default `insight`). |
 | `cpt-insightspec-fr-dep-single-namespace-model` | `install-airbyte.sh`, `install-argo.sh` and `install-insight.sh` all target `INSIGHT_NAMESPACE`; GitOps manifests hard-code `namespace: insight` (forkable). No cross-namespace RBAC is created. |
-| `cpt-insightspec-fr-dep-empty-credentials-default` | `charts/insight/values.yaml` leaves `clickhouse.auth.password`, `mariadb.auth.password`, `mariadb.auth.rootPassword`, `analyticsApi.database.url`, and all OIDC fields empty; the validator refuses any resulting render. |
+| `cpt-insightspec-fr-dep-empty-credentials-default` | `charts/insight/values.yaml` ships no inline passwords. With `credentials.autoGenerate=true` (default) the umbrella creates `insight-db-creds` on first install via `lookup` + `randAlphaNum 24` and reuses it on every upgrade; with `autoGenerate=false` the operator must pre-create the Secret. OIDC fields are empty and the validator refuses any render that doesn't either set `apiGateway.oidc.existingSecret` or all three of `issuer`/`clientId`/`redirectUri`. |
 | `cpt-insightspec-fr-dep-dev-overlay-isolation` | Eval credentials live only in `deploy/values-dev.yaml`; applied via `INSIGHT_VALUES_FILES` by `dev-up.sh` exclusively. |
 
 #### NFR Allocation
@@ -99,7 +99,7 @@ Dev Wrapper ─────────▶ ─┤ dev-up.sh   install.sh   ArgoC
                                                       ▼
                          ┌──────────────────────────────────────────┐
                          │ Infra subcharts (bundled OR external via │
-                         │   `<dep>.enabled` + `<dep>.external.*`)  │
+                         │     `<dep>.deploy` + `<dep>.host/.port`) │
                          │                                          │
                          │   clickhouse | mariadb | redis | redpanda│
                          │                                          │
@@ -217,10 +217,10 @@ The canonical `values.yaml` hard-codes the `insight-` prefix in a handful of app
 Deployment has no runtime domain model — it neither stores nor serves data. The artifacts it manipulates are Kubernetes and Helm resources. The relevant entity set is:
 
 - **Release**: a Helm release (Airbyte, Argo Workflows, or the Insight umbrella). Each release is uniquely identified by `(namespace, release-name)`.
-- **Dependency**: an entry in the umbrella `Chart.yaml` — identified by `name`, optionally `alias`, `version`, `repository`, and (for infra) `condition: <alias>.enabled`.
+- **Dependency**: an entry in the umbrella `Chart.yaml` — identified by `name`, optionally `alias`, `version`, `repository`, and (for infra) `condition: <alias>.deploy`.
 - **Values file**: a YAML file that parameterises a release. Each infra / app / engine component has one curated values file plus optional overlays.
 - **Platform ConfigMap**: the single bridge object emitted by the umbrella. Maps resolved infra coordinates into environment variables for every pod in the namespace.
-- **External contract**: a `<dep>.external` block that declares host, port and a credentialsSecret reference for a dependency the umbrella does not install.
+- **Infra contract**: a single flat `<dep>` block (`deploy`, `host`, `port`, `database`, `username`, `passwordSecret`) — same shape whether the umbrella runs the dep itself or consumes an externally-provided one.
 
 Relationships:
 
@@ -360,7 +360,7 @@ Every pod in the namespace needs the same set of resolved coordinates. Pushing t
 
 ##### Responsibility boundaries
 
-- Does not store credentials. Passwords and tokens live in Secrets referenced by `credentialsSecret.name`.
+- Does not store credentials. Passwords and tokens live in Secrets referenced by `<dep>.passwordSecret.name` (and key); the umbrella auto-generates `insight-db-creds` when `credentials.autoGenerate=true`.
 - Does not mount itself; subcharts are responsible for adding `envFrom: configMapRef: name: {release}-platform`.
 
 ##### Related components (by ID)
@@ -368,24 +368,24 @@ Every pod in the namespace needs the same set of resolved coordinates. Pushing t
 - `cpt-insightspec-component-dep-service-resolution-helpers` — depends on.
 - `cpt-insightspec-component-dep-umbrella-chart` — owned by.
 
-#### Ingestion Template Bridge (`ingestion-templates.yaml`)
+#### Ingestion Templates (`templates/ingestion/*.yaml`)
 
-- [ ] `p2` - **ID**: `cpt-insightspec-component-dep-ingestion-template-bridge`
+- [ ] `p2` - **ID**: `cpt-insightspec-component-dep-ingestion-templates`
 
 ##### Why this component exists
 
-Argo `WorkflowTemplate` definitions use `{{ }}` syntax that collides with Helm templating. Writing them in raw YAML under `files/ingestion/` and loading via `.Files.Get` keeps the authoring experience Argo-native for ingestion engineers. But those raw files still need the umbrella's resolved dependency URLs, so a bridge that substitutes placeholders post-load is required.
+`WorkflowTemplate` objects need the umbrella's resolved dependency URLs (ClickHouse FQDN, Airbyte API URL, default container images) at install time. Earlier iterations stored them as raw files under `files/ingestion/` and substituted `__SENTINEL__` placeholders via `.Files.Get` + `replace`; that approach was opaque, lint-unfriendly, and accumulated a bespoke escaping ritual. Reviewers asked for first-class Helm templating. So the files now live under `templates/ingestion/` and use the umbrella's named helpers directly.
 
 ##### Responsibility scope
 
-- Ranges over `files/ingestion/*.yaml` via `.Files.Glob`.
-- Reads each file via `.Files.Get`.
-- Substitutes `__CLICKHOUSE_FQDN__`, `__CLICKHOUSE_PORT__` and `__AIRBYTE_URL__` with values from the service-resolution helpers.
+- One file per Argo `WorkflowTemplate`, rendered as a normal Helm template.
+- Calls helpers like `{{ include "insight.clickhouse.fqdn" . }}` and `{{ include "insight.airbyte.url" . }}` to embed resolved URLs.
+- Escapes Argo's own `{{ }}` expressions with backtick raw-string literals (`{{ ` + "`" + `"{{inputs.parameters.foo}}"` + "`" + ` }}`) so they survive Helm's pipeline.
 - Gates everything behind `ingestion.templates.enabled` so operators without Argo CRDs present can render the rest of the umbrella.
 
 ##### Responsibility boundaries
 
-- Does not define workflow logic — that lives in the raw files.
+- Does not define workflow business logic — Argo executes the steps once registered.
 - Does not register the templates with the controller — that is Argo's concern once the CRDs are present.
 
 ##### Related components (by ID)
@@ -488,14 +488,15 @@ Developers iterate faster when the platform bring-up is one command. The wrapper
 | global | `global.imagePullSecrets`, `global.storageClass`, `global.security.allowInsecureImages` | Cluster-wide knobs consumed by every subchart. | unstable |
 | airbyte | `airbyte.releaseName`, `airbyte.apiUrl`, `airbyte.jwtSecret.{name,key}` | External coordinates for the separately-installed Airbyte release. | unstable |
 | ingestion | `ingestion.templates.enabled` | Gate for emitting Argo WorkflowTemplates. | unstable |
-| clickhouse | `clickhouse.enabled`, `clickhouse.database`, `clickhouse.auth.*`, `clickhouse.external.*` | Bundled or external ClickHouse. | unstable |
-| mariadb | `mariadb.enabled`, `mariadb.auth.*`, `mariadb.external.*` | Bundled or external MariaDB. | unstable |
-| redis | `redis.enabled`, `redis.auth.enabled`, `redis.external.*` | Bundled or external Redis. | unstable |
-| redpanda | `redpanda.enabled`, `redpanda.tls.*`, `redpanda.auth.sasl.*`, `redpanda.external.*` | Bundled or external Redpanda. | unstable |
-| apiGateway | `apiGateway.replicaCount`, `apiGateway.image.*`, `apiGateway.oidc.*`, `apiGateway.authDisabled`, `apiGateway.ingress.*`, `apiGateway.proxy.routes` | API Gateway service. | unstable |
-| analyticsApi | `analyticsApi.replicaCount`, `analyticsApi.image.*`, `analyticsApi.database.*`, `analyticsApi.clickhouse.*`, `analyticsApi.redis.url` | Analytics API service. | unstable |
-| identityResolution | `identityResolution.enabled`, `identityResolution.replicaCount`, `identityResolution.image.*`, `identityResolution.clickhouse.*` | Optional Identity Resolution. | unstable |
-| frontend | `frontend.replicaCount`, `frontend.image.*`, `frontend.ingress.*`, `frontend.oidc.*` | Frontend SPA. | unstable |
+| credentials | `credentials.autoGenerate` | Toggle umbrella-managed `insight-db-creds` (random passwords on first install, reused on upgrade via `lookup`). | unstable |
+| clickhouse | `clickhouse.deploy`, `clickhouse.host`, `clickhouse.port`, `clickhouse.database`, `clickhouse.username`, `clickhouse.passwordSecret.{name,key}` | Unified shape — bundled when `deploy=true`, external otherwise. | unstable |
+| mariadb | `mariadb.deploy`, `mariadb.host`, `mariadb.port`, `mariadb.database`, `mariadb.username`, `mariadb.passwordSecret.{name,key}` | Unified shape — bundled or external. | unstable |
+| redis | `redis.deploy`, `redis.host`, `redis.port`, `redis.passwordSecret.{name,key}` | Unified shape — bundled or external. | unstable |
+| redpanda | `redpanda.deploy`, `redpanda.brokers`, `redpanda.tls.*`, `redpanda.auth.sasl.*` | Unified shape — bundled or external. | unstable |
+| apiGateway | `apiGateway.replicaCount`, `apiGateway.image.*`, `apiGateway.oidc.*`, `apiGateway.authDisabled`, `apiGateway.ingress.*`, `apiGateway.proxy.routes` | Mandatory API Gateway service. | unstable |
+| analyticsApi | `analyticsApi.replicaCount`, `analyticsApi.image.*` | Mandatory Analytics API service; reads DB/Redis/CH coordinates from auto-generated `insight-analytics-api-config` Secret. | unstable |
+| identityResolution | `identityResolution.deploy`, `identityResolution.replicaCount`, `identityResolution.image.*` | Optional Identity Resolution stub (off by default). | unstable |
+| frontend | `frontend.replicaCount`, `frontend.image.*`, `frontend.ingress.*`, `frontend.oidc.*` | Mandatory Frontend SPA. | unstable |
 
 #### Installer environment contract
 
@@ -638,9 +639,9 @@ sequenceDiagram
     alt OIDC incomplete AND not authDisabled
         Validate-->>Helm: fail("...issuer AND clientId AND redirectUri required")
     else External mode, host missing
-        Validate-->>Helm: fail("...requires <dep>.external.host")
-    else Bundled infra, password empty
-        Validate-->>Helm: fail("...requires <dep>.auth.password")
+        Validate-->>Helm: fail("<dep>.deploy=false requires <dep>.host")
+    else passwordSecret reference incomplete
+        Validate-->>Helm: fail("<dep>.passwordSecret.name/key is required")
     else All required fields present
         Validate-->>Helm: (no output)
     end
@@ -727,9 +728,9 @@ Not applicable. The Deployment subsystem stores no data; it manipulates Kubernet
 **Known gaps**:
 
 - **Release automation.** Versions are pinned in `Chart.yaml` and image tags but there is no CI pipeline that couples `git tag vX.Y.Z` to image build + chart package + OCI push. Releases today are manual. Planned.
-- **Credential propagation.** App-service values contain inline URLs with credentials (e.g. `analyticsApi.database.url`) alongside the bundled-infra `auth.password`. Keeping these in sync is manual and error-prone. The proper `credentialsSecret`-based wiring exists as an option in the values but is not enforced. Planned follow-up is to migrate every app service to read the platform ConfigMap via `envFrom` plus a per-dep `credentialsSecret` and delete the inline URLs entirely.
+- **Credential propagation.** Resolved as of this PR: the umbrella generates `insight-db-creds` (raw passwords) plus `insight-analytics-api-config` and `insight-identity-resolution-config` (full DSNs assembled from helpers + the generated passwords). App services consume these via `envFrom: secretRef: ...`. Inline URLs in `values.yaml` are gone. Remaining follow-up: migrate the few subcharts that still read inline `auth.password` from values to read the umbrella-managed Secret via the same `<dep>.passwordSecret.name/key` reference (bitnami's `auth.existingSecret` knob).
 - **Airbyte webapp gating in production.** Canonical values do not disable the webapp; a production overlay is expected but not shipped. Needs an opinionated prod overlay as a follow-up.
-- **Identity Resolution MVP stub.** The `insight-identity-resolution` subchart exists but is a stub that crashloops on empty bronze. Default `enabled: false` mitigates accidental activation; a real error message at startup is a Backend-side improvement.
+- **Identity Resolution MVP stub.** The `insight-identity-resolution` subchart exists but is a stub that crashloops on empty bronze. Default `identityResolution.deploy: false` mitigates accidental activation; a real error message at startup is a Backend-side improvement.
 - **`rbac-insight.yaml` vs `rbac.yaml`.** The dev/canonical path uses placeholder-substituted `rbac.yaml`; the GitOps path references a pre-rendered `rbac-insight.yaml`. Keeping these synchronised is manual. Planned follow-up is a single templated RBAC source that both paths consume.
 - **Frontend multi-arch.** As noted, published as linux/amd64 only. Infra team owns the CI change.
 

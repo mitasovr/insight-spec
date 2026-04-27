@@ -77,7 +77,7 @@ The third driver is reproducibility for the development team itself: a developer
 | Canonical installer | The orchestrator script `deploy/scripts/install.sh` and its three step scripts (`install-airbyte.sh`, `install-argo.sh`, `install-insight.sh`) that customers are expected to run. |
 | Dev wrapper | `dev-up.sh` (and `dev-down.sh`) — bring-up scripts that build images from source, create a local Kind cluster, and apply the same installers with dev overlays. |
 | Single-namespace model | Deployment topology in which Airbyte, Argo Workflows and the Insight umbrella are three separate Helm releases that all target the same Kubernetes namespace. Multi-tenant separation on a shared cluster is done via distinct namespaces, one per install. |
-| External mode | State of an infra dependency where `<dep>.enabled: false` and the consumer points at a pre-existing external service declared under `<dep>.external` (host, port, credentials Secret). |
+| External mode | State of an infra dependency where `<dep>.deploy: false`. The umbrella does not run the bundled subchart; consumers read the same flat `<dep>.host`, `<dep>.port` and `<dep>.passwordSecret` fields and the Secret is provided by the operator (or platform). |
 | Constructor Platform | Shared multi-product infrastructure fabric operated by the vendor. It provides ClickHouse, MariaDB, Redpanda and identity services that tenant products consume via external-mode contracts. |
 | App-of-Apps | ArgoCD pattern in which one parent Application manifest owns four child Applications (Airbyte, Argo, Argo RBAC, Insight) so sync-wave annotations enforce ordering across them. |
 | Platform ConfigMap | The single `{release}-platform` ConfigMap emitted by the umbrella that contains resolved infra coordinates (CLICKHOUSE_URL, MARIADB_HOST, AIRBYTE_API_URL, …). Pods consume it via `envFrom`. |
@@ -186,7 +186,7 @@ The third driver is reproducibility for the development team itself: a developer
 
 - Release automation (tag → build images → package chart → push OCI): versions are pinned in chart metadata but there is no CI pipeline that publishes the chart yet. Flagged under Risks.
 - Multi-architecture (linux/arm64) frontend image publication.
-- An automated credential-propagation mechanism that wires infra subchart passwords into app-service Secret references without hand-maintained duplication between `<infra>.auth.password` and `<service>.database.url`. This is noted in the values file comments; the proper `credentialsSecret` pattern exists as an optional path but is not enforced.
+- Bidirectional sync between the umbrella-managed `insight-db-creds` Secret and a customer-supplied secret-management system (Vault, AWS Secrets Manager, External Secrets Operator). Customers integrating with such systems either pre-create `insight-db-creds` themselves and set `credentials.autoGenerate: false`, or they accept the auto-generated values and mirror them outwards by their own means.
 - Cluster provisioning (creating the customer's Kubernetes cluster, setting up a StorageClass, installing ingress-nginx on a production cluster). The dev wrapper bootstraps Kind for local work; production installs assume a working cluster with a default StorageClass and an ingress controller already in place.
 - Backup, restore, and disaster-recovery workflows for the bundled stateful services (ClickHouse, MariaDB). Mentioned in the Backend PRD; not owned by Deployment.
 - Identity Provider (OIDC) provisioning. The deployment contract requires OIDC credentials as input; standing up an IdP is the customer's responsibility.
@@ -220,7 +220,7 @@ The umbrella chart **MUST** treat API Gateway, Analytics API and Frontend as man
 
 - [ ] `p2` - **ID**: `cpt-insightspec-fr-dep-optional-identity-resolution`
 
-The umbrella chart **MUST** treat the `insight-identity-resolution` subchart as optional with `condition: identityResolution.enabled` defaulting to `false`, because that service requires populated bronze data and crash-loops on an empty database.
+The umbrella chart **MUST** treat the `insight-identity-resolution` subchart as optional with `condition: identityResolution.deploy` defaulting to `false`, because that service requires populated bronze data and crash-loops on an empty database.
 
 **Rationale**: A first install has no bronze data; shipping identity-resolution enabled by default would make every first install look broken.
 
@@ -230,9 +230,9 @@ The umbrella chart **MUST** treat the `insight-identity-resolution` subchart as 
 
 - [ ] `p1` - **ID**: `cpt-insightspec-fr-dep-ingestion-templates`
 
-The umbrella chart **MUST** emit the Argo `WorkflowTemplate` objects under `charts/insight/files/ingestion/` through `.Files.Get` + placeholder substitution for `__CLICKHOUSE_FQDN__`, `__CLICKHOUSE_PORT__` and `__AIRBYTE_URL__`, gated by `ingestion.templates.enabled`, so that Argo's `{{inputs.parameters.*}}` syntax does not collide with Helm templating.
+The umbrella chart **MUST** emit the Argo `WorkflowTemplate` objects under `charts/insight/templates/ingestion/` as first-class Helm templates that consume the umbrella's named helpers (`insight.clickhouse.fqdn`, `insight.airbyte.url`, etc.) directly. Argo's own `{{inputs.parameters.*}}` expressions **MUST** be escaped with backtick raw-string literals so they pass through Helm rendering unmodified. Emission is gated by `ingestion.templates.enabled`.
 
-**Rationale**: Keeps ingestion-pipeline definitions readable by ingestion engineers who do not need to know Helm, while still making dependency URLs follow release name and namespace.
+**Rationale**: First-class Helm templating gives `helm lint` coverage, removes a custom placeholder-substitution bridge, and lets pipeline authors call any umbrella helper without round-tripping through values keys. The earlier placeholder-substitution approach was rejected on review for being fragile and uncheckable.
 
 **Actors**: `cpt-insightspec-actor-customer-sre`, `cpt-insightspec-actor-platform-developer`
 
@@ -262,7 +262,7 @@ Each infrastructure dependency in the umbrella (ClickHouse, MariaDB, Redis, Redp
 
 - [ ] `p1` - **ID**: `cpt-insightspec-fr-dep-fail-fast-validation`
 
-The umbrella chart **MUST** invoke an `insight.validate` template during rendering that fails rendering with a readable message whenever `<dep>.enabled: false` is used without all required `<dep>.external.*` fields (host, port, database where applicable, credentials Secret name), whenever a bundled infra subchart is enabled but its password is empty, or whenever `apiGateway.authDisabled: false` is set but OIDC is only partially configured.
+The umbrella chart **MUST** invoke an `insight.validate` template during rendering that fails rendering with a readable message whenever `<dep>.deploy: false` is used without `<dep>.host`, whenever any `<dep>.passwordSecret.name` or `.key` is missing, whenever a pre-existing `insight-db-creds` Secret is present but a required key is missing or empty (BYO mode), or whenever `apiGateway.authDisabled: false` is set with neither `apiGateway.oidc.existingSecret` nor all three of `issuer` + `clientId` + `redirectUri` populated together.
 
 **Rationale**: Silent defaults or partial configuration produces clusters that install cleanly but fail at runtime — by which time the operator has already lost access to the diagnostic output.
 
@@ -570,9 +570,9 @@ An install that is missing any of the following **MUST** abort during `helm temp
 
 **Main Flow**:
 
-1. Operator prepares an overlay values file with `clickhouse.enabled: false`, `mariadb.enabled: false`, `redpanda.enabled: false`, each with the matching `external:` host/port/credentialsSecret block.
+1. Operator pre-creates `insight-db-creds` in the target namespace with the platform-issued passwords, then prepares an overlay values file that sets `credentials.autoGenerate: false`, `clickhouse.deploy: false`, `mariadb.deploy: false`, `redis.deploy: false`, `redpanda.deploy: false`, each with the matching flat `host` / `port` / `passwordSecret` block.
 2. Operator runs `SKIP_AIRBYTE=1` (platform provides Airbyte too) and the canonical installer for the umbrella only.
-3. The umbrella's validator verifies every `external.*` field is present.
+3. The umbrella's validator verifies every `<dep>.host` is present and every `<dep>.passwordSecret.{name,key}` resolves; `lookup` reads `insight-db-creds` and refuses to render with a missing or empty key.
 4. `helm upgrade --install` deploys application services that talk to the shared platform infra through the platform ConfigMap.
 
 **Postconditions**: tenant Insight install is live without bundled stateful infra; shared-platform services carry tenant data isolated at the database level (outside this subsystem's concern).
@@ -628,7 +628,7 @@ An install that is missing any of the following **MUST** abort during `helm temp
 - [ ] `deploy/scripts/install.sh` installs the full stack on a fresh Kind cluster and all pods reach Ready without manual intervention, end-to-end in under 15 minutes on a typical developer laptop.
 - [ ] Two concurrent installs in namespaces `insight-a` and `insight-b` on the same Kind cluster do not observe each other's Workflow objects.
 - [ ] Applying `deploy/gitops/root-app.yaml` to a cluster with ArgoCD 2.6+ produces four child Applications that converge to Healthy in the Airbyte → Argo → Insight order enforced by sync-wave annotations.
-- [ ] With `clickhouse.enabled: false` + a complete `clickhouse.external` block pointing at a Constructor Platform instance, the resulting pods read from that external ClickHouse via the platform ConfigMap without modification to any subchart.
+- [ ] With `clickhouse.deploy: false` + a complete `clickhouse.host` / `.port` / `.passwordSecret` block pointing at a Constructor Platform instance, the resulting pods read from that external ClickHouse via the platform ConfigMap without modification to any subchart.
 - [ ] `dev-up.sh` on Apple Silicon succeeds end-to-end without manual `docker pull --platform` calls; the `DEVLOG.md`-documented first-run failures do not regress.
 
 ## 10. Dependencies
@@ -660,8 +660,8 @@ An install that is missing any of the following **MUST** abort during `helm temp
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | No release automation yet — chart and images are hand-tagged. | A manual mis-tag ships an inconsistent umbrella. | Track as Open Item; write a CI pipeline that couples `git tag vX.Y.Z` → image build + chart package + OCI push; document the manual release process in the meantime. |
-| App-service values duplicate infra passwords inline (e.g. `analyticsApi.database.url`) alongside the bundled-infra `auth.password`, so one change must be made in two places. | Drift between infra password and DSN produces a silently-broken install. | Flagged in `values.yaml` comments; planned follow-up to migrate every service to `envFrom: {release}-platform` + `credentialsSecret` and drop the inline URLs. |
+| Inline infra passwords previously had to be duplicated into app-service DSNs. | Drift between infra password and DSN produced a silently-broken install. | Resolved: `credentials.autoGenerate=true` writes `insight-db-creds` once and the umbrella derives all app-service Secrets (`insight-analytics-api-config`, `insight-identity-resolution-config`) from the same passwords. BYO mode reads the customer-supplied `insight-db-creds` instead. |
 | Frontend image is `linux/amd64` only — Apple Silicon hosts rely on QEMU emulation or local rebuild. | Slow first pull and occasional emulation bugs on dev machines. | Dev wrapper builds the frontend from source as a workaround; infra team to publish multi-arch images. |
-| Identity Resolution subchart ships as MVP stub that crashloops on empty bronze. | If operator flips `identityResolution.enabled: true` before any BambooHR sync, the release looks broken. | Keep default `enabled: false`; document the prerequisite in README; surface a clearer error message in the service itself (Backend concern). |
+| Identity Resolution subchart ships as MVP stub that crashloops on empty bronze. | If operator flips `identityResolution.deploy: true` before any BambooHR sync, the release looks broken. | Keep default `identityResolution.deploy: false`; document the prerequisite in README; surface a clearer error message in the service itself (Backend concern). |
 | Airbyte chart 1.9.x is deliberately skipped because its bundled app 2.0.x-alpha is not production-grade. | Customer asking for 1.9 gets a "no". | Document the policy in the Airbyte README; revisit when 2.0 GA ships. |
 | Bitnami's late-2025 registry change means the MariaDB / Redis subcharts rely on `bitnamilegacy` + `global.security.allowInsecureImages`. | If Bitnami deprecates `bitnamilegacy`, both subcharts break. | Monitor Bitnami's policy; plan a migration to a vendored or self-hosted registry; enterprise customers are expected to use their own internal registry. |

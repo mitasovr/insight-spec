@@ -8,16 +8,18 @@ Single canonical unit of delivery for the Insight platform.
 
 ## What it contains
 
-| Component      | Kind        | Source                                       |
-|----------------|-------------|----------------------------------------------|
-| ClickHouse     | infra       | `helmfile/charts/clickhouse` (local wrapper) |
-| MariaDB        | infra       | bitnami/mariadb ~20                          |
-| Redis          | infra       | bitnami/redis ~21                            |
-| Redpanda       | infra       | redpanda/redpanda ~5                         |
-| API Gateway    | app service | `src/backend/services/api-gateway/helm`      |
-| Analytics API  | app service | `src/backend/services/analytics-api/helm`    |
-| Identity       | app service | `src/backend/services/identity/helm`         |
-| Frontend (SPA) | app service | `src/frontend/helm`                          |
+| Component             | Kind                 | Source                                       | Toggle                          |
+|-----------------------|----------------------|----------------------------------------------|---------------------------------|
+| ClickHouse            | infra                | `helmfile/charts/clickhouse` (local wrapper) | `clickhouse.deploy`             |
+| MariaDB               | infra                | bitnami/mariadb ~20                          | `mariadb.deploy`                |
+| Redis                 | infra                | bitnami/redis ~21                            | `redis.deploy`                  |
+| Redpanda              | infra                | redpanda/redpanda ~5                         | `redpanda.deploy`               |
+| API Gateway           | app service (req'd)  | `src/backend/services/api-gateway/helm`      | mandatory (no flag)             |
+| Analytics API         | app service (req'd)  | `src/backend/services/analytics-api/helm`    | mandatory (no flag)             |
+| Frontend (SPA)        | app service (req'd)  | `src/frontend/helm`                          | mandatory (no flag)             |
+| Identity Resolution   | app service (opt)    | `src/backend/services/identity/helm`         | `identityResolution.deploy`     |
+
+> Identity Resolution is a C# stub that requires populated bronze data; it is **not** an OIDC provider. Off by default.
 
 ## What it does NOT contain
 
@@ -57,31 +59,32 @@ helm upgrade --install insight charts/insight \
 
 Before going to prod:
 
-- [ ] Set secrets via `existingSecret` references, **never inline**:
-  - `apiGateway.oidc.existingSecret`
-  - `analyticsApi.clickhouse.credentialsSecret.name`
-  - `identityResolution.clickhouse.credentialsSecret.name` (when `identityResolution.enabled=true`)
-- [ ] Override all `changeme` passwords: `clickhouse.auth.password`, `mariadb.auth.*`
+- [ ] Decide on credentials strategy:
+  - **Auto-gen (default):** `credentials.autoGenerate: true` — the umbrella creates `insight-db-creds` with random 24-char passwords on first install and reuses them via `lookup` on every upgrade.
+  - **BYO / Constructor Platform:** pre-create `insight-db-creds` with all required keys (`clickhouse-password`, `mariadb-password`, `mariadb-root-password`, `redis-password`) before the first `helm install`. The umbrella picks them up. Missing/empty keys fail fast.
+- [ ] Set OIDC via `apiGateway.oidc.existingSecret` (preferred) or all three of `issuer` + `clientId` + `redirectUri` together. Never inline secrets.
 - [ ] Enable ingress + TLS: `apiGateway.ingress`, `frontend.ingress`
 - [ ] Bump resources where needed (default `requests` are conservative)
 - [ ] `redpanda.tls.enabled: true`, `redpanda.auth.sasl.enabled: true`
-- [ ] Point MariaDB/ClickHouse/Redis to external managed services if running inside Constructor Platform (set `enabled: false` on the subchart + fill `external.*` + override URLs in the app-service sections)
+- [ ] Point MariaDB/ClickHouse/Redis/Redpanda to external managed services if running inside Constructor Platform — set `<dep>.deploy: false` and fill `<dep>.host` / `.port` / `.passwordSecret`. App-service URLs follow automatically (resolved by helpers).
 - [ ] Set `global.imagePullSecrets` if pulling from a private registry
 
 ## Integration modes
 
-The chart supports two deployment shapes; the pattern is symmetric across every infra dependency (ClickHouse, MariaDB, Redis, Redpanda).
+The chart uses ONE unified shape per infra dependency (ClickHouse, MariaDB, Redis, Redpanda). The `deploy` flag toggles whether the umbrella runs the subchart; everything else (host, port, credentials) is the same data the consumers read in either case.
 
 **Standalone** (eval, on-prem single-tenant, dev):
-- `<infra>.enabled: true` — the umbrella deploys the dependency itself.
-- App services connect to the internal DNS (`{release}-clickhouse`, etc.).
+- `<dep>.deploy: true` — the umbrella runs the subchart.
+- `<dep>.host: ""` — defaults to `{release}-<dep>` (internal in-cluster service).
+- `<dep>.passwordSecret` points at `insight-db-creds`, which the umbrella auto-generates on first install (or you pre-create for BYO).
 
-**Constructor Platform component** (required when Insight ships inside the platform):
-- `<infra>.enabled: false` — the platform provides the dependency externally.
-- Fill `<infra>.external.host` / `.port` / `.credentialsSecret.name`.
-- App service URLs must be overridden to point at the external hosts (values are not templatable in Helm; see notes in `values.yaml`).
+**Constructor Platform component** (Insight ships inside the platform):
+- `<dep>.deploy: false` — the umbrella does NOT run the subchart.
+- `<dep>.host` is required (validator fails fast otherwise).
+- `<dep>.passwordSecret` points at a Secret the platform created in the namespace.
+- App-service URLs are computed by helpers from the same `<dep>.host` / `.port`, so no extra overrides are needed.
 
-The umbrella validator (`templates/_helpers.tpl` → `insight.validate`) fails fast if `enabled: false` is set without a matching `external.host` — typos do not reach the cluster.
+The umbrella validator (`templates/_helpers.tpl` → `insight.validate`) fails fast on the typical typos: `deploy: false` without `host`, OIDC enabled without `existingSecret` or all inline fields, missing `passwordSecret.{name,key}`.
 
 ## Values reference
 
@@ -89,9 +92,11 @@ See comments in [`values.yaml`](./values.yaml) — every block is documented inl
 
 Key groups:
 
+- `credentials.autoGenerate` — toggle umbrella-managed `insight-db-creds`
 - `global.*` — cluster-wide defaults (pull secrets, storage class, bitnami image policy)
-- `<infraname>.enabled` / `<infraname>.external.*` — toggle standalone vs Constructor Platform external
-- `apiGateway` / `analyticsApi` / `identity` / `frontend` — mandatory app services (no enabled-flag; the gateway is the single entrance and the product is one unit)
+- `<dep>.deploy` / `<dep>.host` / `<dep>.port` / `<dep>.passwordSecret` — unified shape for ClickHouse, MariaDB, Redis, Redpanda
+- `apiGateway` / `analyticsApi` / `frontend` — **mandatory** app services (no deploy-flag; the gateway is the single entrance and the product is one unit)
+- `identityResolution.deploy` — **optional** identity-resolution service (off by default; not an OIDC provider)
 - `apiGateway.oidc` — OIDC configuration (prefer `existingSecret`; inline requires `issuer` + `clientId` + `redirectUri` together)
 - `apiGateway.proxy.routes` — reverse-proxy config to downstream services
 - `ingestion.templates.enabled` — whether to ship Argo WorkflowTemplates; requires Argo CRDs to be present in the cluster
