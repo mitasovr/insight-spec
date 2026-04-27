@@ -9,8 +9,15 @@
 ##
 ## Values come from a git-hosted overlay (deploy/gitops/insight-values.yaml)
 ## so chart and configuration stay in sync: no inlined values to drift.
-## The overlay intentionally contains ONLY the fields that differ from the
-## chart's built-in defaults (OIDC secret reference, ingress hosts, TLS).
+## The overlay carries the GitOps-specific overrides — image tags, OIDC
+## existingSecret reference, ingress hosts, TLS, and most importantly
+## `credentials.autoGenerate: false` (see insight-values.example.yaml
+## for why this is mandatory under ArgoCD).
+##
+## NOTE: this repo ships `insight-values.example.yaml` with `*.example.com`
+## placeholders. Customers MUST copy it to `insight-values.yaml`, replace
+## the placeholder hosts, and pre-create the `insight-db-creds` Secret in
+## the release namespace before the first sync.
 ##
 apiVersion: argoproj.io/v1alpha1
 kind: Application

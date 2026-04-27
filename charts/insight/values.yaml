@@ -55,16 +55,26 @@
 
 # ─── Credentials ──────────────────────────────────────────────────────────
 # Single source of truth for all DB passwords. With autoGenerate=true (the
-# default), the umbrella generates random passwords and stores them in
-# the Secret `{release}-db-creds` (keys: clickhouse-password,
-# mariadb-password, mariadb-root-password, redis-password). Subsequent
-# upgrades reuse the existing Secret via `lookup` — passwords are stable.
+# default), the umbrella generates random 24-char passwords on first
+# install and stores them in the Secret `insight-db-creds` (keys:
+# clickhouse-password, mariadb-password, mariadb-root-password,
+# redis-password). Subsequent `helm upgrade` runs reuse the existing
+# values via `lookup` — passwords stay stable.
 #
-# For Constructor Platform / BYO: pre-create the Secret with your own
-# values before `helm install`; lookup finds and uses them.
+# ─────────────────────────────────────────────────────────────────────
+#  GitOps note — IMPORTANT
+# ─────────────────────────────────────────────────────────────────────
+# ArgoCD renders charts via `helm template`, where Helm's `lookup`
+# function ALWAYS returns nil — so under a reconcile loop every sync
+# would regenerate `randAlphaNum 24` and rotate every DB password.
+# Set `autoGenerate: false` in any GitOps overlay (see
+# deploy/gitops/insight-values.example.yaml) and pre-create
+# `insight-db-creds` via ExternalSecrets / sealed-secrets / SOPS.
 #
-# To disable auto-gen entirely (air-gapped / custom secret tooling):
-# set autoGenerate=false and pre-create the Secret yourself.
+# For Constructor Platform / BYO (air-gapped, custom secret tooling):
+# same — `autoGenerate: false` + pre-create the Secret. `lookup` finds
+# and uses it; the umbrella's BYO validator refuses any install where
+# a required key is missing, empty, or contains URL-reserved characters.
 credentials:
   autoGenerate: true
 

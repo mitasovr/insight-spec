@@ -20,6 +20,21 @@ All Insight components live in one namespace (default `insight`):
   - `oci://ghcr.io/cyberfabric/charts` (Insight OCI registry) — or to a Git repo with the chart
   - `https://github.com/cyberfabric/insight.git` (or your fork) for values files and supplemental manifests
 - An `AppProject` is created (or use `default`)
+- **`insight-db-creds` Secret pre-created** in the release namespace BEFORE the first sync. See "GitOps + auto-gen" below.
+
+## GitOps + auto-generated credentials — IMPORTANT
+
+The umbrella's `credentials.autoGenerate: true` (chart default) uses Helm's `lookup` function to keep `insight-db-creds` stable across upgrades. **ArgoCD renders charts via `helm template`, where `lookup` always returns nil** — so under a GitOps reconcile loop every sync would regenerate `randAlphaNum 24`, overwriting the Secret and rotating passwords on every Argo sync. This breaks every DB client.
+
+For GitOps deployments: the shipped [`insight-values.example.yaml`](./insight-values.example.yaml) sets `credentials.autoGenerate: false`. The operator MUST pre-create `insight-db-creds` with all four required keys:
+- `clickhouse-password`
+- `mariadb-password`
+- `mariadb-root-password`
+- `redis-password`
+
+Use the secret-management tool of your choice — ExternalSecrets Operator + Vault, sealed-secrets, SOPS — to keep the values out of Git. The umbrella's BYO validator refuses to install when any required key is missing, empty, or contains URL-reserved characters (`@ : / ? # %`) that would silently corrupt embedded DSNs.
+
+The same caveat applies to OIDC: pre-create `insight-oidc` (referenced as `apiGateway.oidc.existingSecret`) with `issuer`, `audience`, `clientId`, `redirectUri`. The chart fails fast if any field is missing.
 
 ## Files
 
@@ -29,7 +44,7 @@ All Insight components live in one namespace (default `insight`):
 | [`argo-application.yaml`](./argo-application.yaml) | Argo Workflows chart. Sync wave 0. Destination namespace `insight`. Sets `controller.workflowNamespaces=[insight]` and `controller.instanceID` via Helm parameters. |
 | [`argo-rbac-application.yaml`](./argo-rbac-application.yaml) | Supplemental Argo RBAC (`argo-workflow-executor` Role/Binding). Sync wave 0. Uses the pre-rendered [`rbac-insight.yaml`](../argo/rbac-insight.yaml). |
 | [`insight-application.yaml`](./insight-application.yaml) | Insight umbrella. Sync wave 1. Destination namespace `insight`. |
-| [`insight-values.yaml`](./insight-values.yaml) | GitOps overlay for Insight — minimal overrides on top of the chart defaults. |
+| [`insight-values.example.yaml`](./insight-values.example.yaml) | EXAMPLE GitOps overlay — `credentials.autoGenerate: false`, image tags pinned, OIDC via `existingSecret`, ingress hosts as `*.example.com` placeholders. **Copy to `insight-values.yaml`, replace placeholders, do NOT apply as-is.** |
 | [`root-app.yaml`](./root-app.yaml) | App-of-Apps: one entry point that manages the four above. |
 
 ## Single source of truth
@@ -37,7 +52,7 @@ All Insight components live in one namespace (default `insight`):
 Each infra component has exactly one values file:
 - Airbyte: [`deploy/airbyte/values.yaml`](../airbyte/values.yaml)
 - Argo Workflows: [`deploy/argo/values.yaml`](../argo/values.yaml)
-- Insight: the chart's own [`values.yaml`](../../charts/insight/values.yaml), plus [`insight-values.yaml`](./insight-values.yaml) for ArgoCD-specific overrides (OIDC secret, ingress hosts, TLS)
+- Insight: the chart's own [`values.yaml`](../../charts/insight/values.yaml), plus a customer-edited copy of [`insight-values.example.yaml`](./insight-values.example.yaml) for ArgoCD-specific overrides (image tags, OIDC secret, ingress hosts, TLS, `credentials.autoGenerate: false`)
 
 All four Applications reference these files via multi-source (`$values` pattern), so imperative (`deploy/scripts/install-*.sh`) and declarative (ArgoCD) deploys render **identical** manifests.
 
