@@ -19,19 +19,6 @@ for source_key in $(state_list "tenants.${TENANT}.connectors.${CONNECTOR}"); do
 done
 [[ -n "$CONNECTION_ID" ]] || { echo "ERROR: no connection_id for connector '$CONNECTOR' tenant '$TENANT'. Run update-connections.sh first." >&2; exit 1; }
 
-# Find descriptor by connector name — try exact match, then prefix match
-DBT_SELECT=$(python3 -c "
-import yaml, pathlib, sys
-connector = '${CONNECTOR}'
-for p in sorted(pathlib.Path('connectors').rglob('descriptor.yaml')):
-    desc = yaml.safe_load(open(p))
-    name = desc.get('name', '')
-    if name == connector or connector.startswith(name + '-'):
-        print(desc.get('dbt_select', '+tag:silver'))
-        sys.exit(0)
-print('+tag:silver')
-" 2>/dev/null)
-
 # ─── Resolve toolbox_image for the dbt-run step ────────────────────────────
 # Precedence:
 #   1. $TOOLBOX_IMAGE env var (explicit caller override)
@@ -60,7 +47,6 @@ fi
 
 echo "Running sync: ${CONNECTOR} / ${TENANT}"
 echo "  connection_id: ${CONNECTION_ID}"
-echo "  dbt_select:    ${DBT_SELECT}"
 echo "  toolbox_image: ${TOOLBOX_IMAGE}"
 
 kubectl create -n argo -f - <<EOF
@@ -85,8 +71,8 @@ spec:
               parameters:
                 - name: connection_id
                   value: "${CONNECTION_ID}"
-                - name: dbt_select
-                  value: "${DBT_SELECT}"
+                - name: connector
+                  value: "${CONNECTOR}"
                 - name: toolbox_image
                   value: "${TOOLBOX_IMAGE}"
 EOF

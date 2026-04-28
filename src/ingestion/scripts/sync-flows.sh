@@ -39,10 +39,9 @@ sync_tenant() {
   for descriptor in "${CONNECTORS_DIR}"/*/*/descriptor.yaml; do
     [[ -f "$descriptor" ]] || continue
 
-    local connector schedule dbt_select workflow
+    local connector schedule workflow
     connector=$(yq -r '.name' "$descriptor")
     schedule=$(yq -r '.schedule' "$descriptor" 2>/dev/null | grep -v null || echo "0 2 * * *")
-    dbt_select=$(yq -r '.dbt_select' "$descriptor" 2>/dev/null | grep -v null || echo "+tag:silver")
     workflow=$(yq -r '.workflow' "$descriptor" 2>/dev/null | grep -v null || echo "sync")
 
     # Find the workflow template
@@ -66,7 +65,6 @@ sync_tenant() {
     TENANT_ID="$tenant" \
     CONNECTION_ID="$connection_id" \
     SCHEDULE="$schedule" \
-    DBT_SELECT="$dbt_select" \
       envsubst < "$tpl" > "$output"
 
     echo "  Generated: ${output}"

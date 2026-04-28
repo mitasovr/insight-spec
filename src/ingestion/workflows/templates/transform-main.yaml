@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: transform-main
+  namespace: argo
+  labels:
+    app.kubernetes.io/part-of: ingestion
+spec:
+  entrypoint: run
+  templates:
+    - name: run
+      # Default transform path for connectors with no Rust enrichment.
+      #
+      # Selector: `tag:${connector}+` — staging models tagged with the
+      # connector name, plus everything downstream (silver class_*, fct_*,
+      # mtr_*) reachable via dbt-graph edges. Other connectors that are
+      # not configured stay sideways in the graph and are not pulled in.
+      # Inside silver, union_by_tag still uses adapter.get_relation() to
+      # skip staging tables that haven't materialised yet.
+      inputs:
+        parameters:
+          - name: connector
+          - name: toolbox_image
+            default: "ghcr.io/cyberfabric/insight-toolbox:latest"
+          - name: clickhouse_host
+            default: "clickhouse.data.svc.cluster.local"
+          - name: clickhouse_port
+            default: "8123"
+      dag:
+        tasks:
+          - name: transform
+            templateRef:
+              name: dbt-run
+              template: run
+            arguments:
+              parameters:
+                - name: dbt_select
+                  value: "tag:{{inputs.parameters.connector}}+"
+                - name: toolbox_image
+                  value: "{{inputs.parameters.toolbox_image}}"
+                - name: clickhouse_host
+                  value: "{{inputs.parameters.clickhouse_host}}"
+                - name: clickhouse_port
+                  value: "{{inputs.parameters.clickhouse_port}}"

@@ -1,6 +1,6 @@
 # Generic sync CronWorkflow template
 # Variables resolved by sync-flows.sh from descriptor.yaml + connection state:
-#   CONNECTOR, TENANT_ID, CONNECTION_ID, SCHEDULE, DBT_SELECT
+#   CONNECTOR, TENANT_ID, CONNECTION_ID, SCHEDULE
 
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
@@ -30,5 +30,5 @@ spec:
                 parameters:
                   - name: connection_id
                     value: "${CONNECTION_ID}"
-                  - name: dbt_select
-                    value: "${DBT_SELECT}"
+                  - name: connector
+                    value: "${CONNECTOR}"
