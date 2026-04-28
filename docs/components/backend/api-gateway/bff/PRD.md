@@ -190,13 +190,14 @@ The system **MUST** expose `POST /auth/refresh`. When called with a valid sessio
 3. Update the session record's `expires_at` to `now + session_ttl`.
 4. Update the user-index sorted-set score for this session to the new `expires_at`.
 5. Re-issue the session cookie with a fresh `Max-Age`.
-6. (Optional, transparent to SPA) refresh the IdP access token if it is near expiry; on IdP refresh failure, revoke the session and return 401.
+6. (Internal, transparent to SPA) refresh the IdP access token if it is near expiry; on IdP refresh failure, revoke the session and return 401.
+7. Return `200` with a JSON body containing `expires_at` (epoch seconds, absolute deadline) and `refresh_at` (epoch seconds, recommended next-refresh moment = `expires_at − safety_margin`). `safety_margin` is configurable, default 30 s.
 
 The system **MUST NOT** extend the session on any other endpoint or proxied API call. Regular `/api/*` traffic does not slide the TTL.
 
-The SPA is expected to call `/auth/refresh` on a cadence shorter than the configured TTL (default expectation: every 60 s for a 120 s TTL). The cadence is a frontend concern; the BFF only enforces the TTL.
+The SPA uses `refresh_at` to schedule its next call. `GET /auth/me` **MUST** return the same two fields so the SPA can prime its timer at page load.
 
-**Rationale**: Explicit refresh keeps idle sessions short-lived without requiring sliding TTL machinery on the hot path. SPA controls when the user is "active". One-line knob (`session_ttl`) for operators.
+**Rationale**: Explicit refresh keeps idle sessions short-lived without sliding-TTL machinery on the hot path. Returning `refresh_at` lets the operator tune `session_ttl` without an SPA change.
 
 **Actors**: `cpt-insightspec-actor-browser-user`
 
@@ -387,9 +388,9 @@ Every login, logout, session refresh, IdP token refresh failure, session revocat
 |--------|------|---------|
 | GET | `/auth/login` | Start OIDC flow; 302 to IdP. |
 | GET | `/auth/callback` | OIDC callback; sets session cookie; 302 to SPA. |
-| POST | `/auth/refresh` | Extend session TTL; re-issue cookie. SPA calls this on a fixed cadence below the configured TTL. |
+| POST | `/auth/refresh` | Extend session TTL; re-issue cookie; return `{expires_at, refresh_at}`. SPA schedules next call from `refresh_at`. |
 | POST | `/auth/logout` | Revoke current session; clear cookie; return RP-logout URL. |
-| GET | `/auth/me` | Return current user and tenant. |
+| GET | `/auth/me` | Return current user, tenant, plus `{expires_at, refresh_at}` so the SPA can prime its refresh timer at page load. |
 | GET | `/auth/sessions` | List active sessions for current user. |
 | DELETE | `/auth/sessions/{id}` | Revoke a specific session. |
 | DELETE | `/auth/sessions` | Revoke all sessions of current user. |
@@ -468,14 +469,14 @@ JWKS publication and `/api/*` reverse proxy live on the [Router](../router/PRD.m
 **Preconditions**: Valid session cookie; current time before `absolute_expires_at`.
 
 **Main Flow**:
-1. SPA calls `POST /auth/refresh` (on its own cadence -- typically every 60 s for a 120 s TTL).
+1. SPA calls `POST /auth/refresh`. The cadence is driven by the `refresh_at` value the SPA received in the previous response.
 2. BFF reads the cookie, fetches `bff:session:{id}`.
-3. BFF computes `new_expires_at = now + session_ttl`, capped at `absolute_expires_at`.
+3. BFF computes `new_expires_at = min(now + session_ttl, absolute_expires_at)`.
 4. BFF runs a Lua script that updates `bff:session:{id}` and `ZADD bff:user_sessions:{user_id} new_expires_at sid` atomically.
 5. (If IdP access token is near expiry) BFF refreshes it via the IdP refresh token.
-6. BFF re-issues the cookie with `Max-Age = session_ttl` and returns 204.
+6. BFF re-issues the cookie with `Max-Age = new_expires_at − now` and returns `200` with body `{expires_at: new_expires_at, refresh_at: new_expires_at − safety_margin}`.
 
-**Postconditions**: Session lives for another TTL window. ZSET score updated.
+**Postconditions**: Session lives for another TTL window. ZSET score updated. SPA has the next `refresh_at` to schedule from.
 
 **Alternative Flows**:
 - **Session unknown or expired**: 401, cookie cleared.

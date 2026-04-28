@@ -146,6 +146,7 @@ Helm values that affect both modules:
 | `gateway.replicas` | 2 | Pod count |
 | `gateway.image` | (chart) | Container image |
 | `gateway.session_ttl_seconds` | 120 | Session cookie TTL (BFF) |
+| `gateway.session_refresh_safety_margin_seconds` | 30 | `refresh_at = expires_at − safety_margin` returned to the SPA |
 | `gateway.session_absolute_lifetime_seconds` | 28800 | Hard cap (BFF) |
 | `gateway.jwt_ttl_seconds` | 120 | Gateway JWT TTL (Router); must be ≤300 |
 | `gateway.csrf_origins` | [] | Allowlist of acceptable `Origin` values for `/auth/*` mutations |
@@ -165,7 +166,7 @@ Metrics, logs, and audit events are described in each module's DESIGN. They shar
 
 ### 5.3 Failure Handling
 
-- Redis unreachable → 503 from `/api/*`, 401 from `/auth/*` mutations, readiness fails.
+- Redis unreachable → 503 from `/api/*`, 401 from `/auth/*` mutations, readiness fails. No local cache, no degraded mode -- see [BFF DD-BFF-06](./bff/DESIGN.md#dd-bff-06-redis-outage--no-auth-fail-closed).
 - Signing-key Secret missing → readiness fails, no requests served.
 - Route ConfigMap invalid at startup → readiness fails. Invalid at runtime → keep current table, alert.
 - IdP unreachable during login → 502 with retry-after; existing sessions continue to work until they need IdP refresh.

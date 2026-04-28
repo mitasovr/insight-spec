@@ -30,8 +30,7 @@ date: 2026-04-28
   - [4.3 Janitor for Expired Sessions](#43-janitor-for-expired-sessions)
   - [4.4 Observability](#44-observability)
 - [5. Design Decisions](#5-design-decisions)
-- [6. Open Questions](#6-open-questions)
-- [7. Traceability](#7-traceability)
+- [6. Traceability](#6-traceability)
 
 <!-- /toc -->
 
@@ -351,13 +350,14 @@ sequenceDiagram
     B->>R: HMGET bff:session:{sid}
     R-->>B: session
     B->>B: check now < absolute_expires_at
+    B->>B: new_exp = min(now + session_ttl, absolute_expires_at)
     alt IdP access_token near expiry
         B->>I: refresh_token grant
         I-->>B: new access_token
     end
     B->>R: EVAL refresh_session.lua<br/>HSET bff:session:{sid} expires_at new_exp<br/>ZADD bff:user_sessions:{uid} new_exp sid<br/>EXPIREAT bff:session:{sid} new_exp
     R-->>B: OK
-    B-->>U: 204 + Set-Cookie __Host-sid Max-Age=session_ttl
+    B-->>U: 200 {expires_at: new_exp, refresh_at: new_exp - safety_margin}<br/>Set-Cookie __Host-sid Max-Age=(new_exp - now)
 ```
 
 #### IdP Token Refresh Failure
@@ -684,7 +684,7 @@ Audit (via Audit Service): login OK, login fail, refresh, logout, revoke (single
 - Opaque IDs leak less on theft -- they only work on this host, not as a portable bearer.
 - Cookie size stays tiny.
 
-**Consequences**: Hard dependency on Redis. Mitigated by HA Redis; degraded-mode policy is OQ-BFF-01.
+**Consequences**: Hard dependency on Redis. No local cache, no degraded mode (see DD-BFF-06).
 
 ### DD-BFF-02: Explicit Session Refresh, No Sliding TTL
 
@@ -730,25 +730,58 @@ Audit (via Audit Service): login OK, login fail, refresh, logout, revoke (single
 
 **Consequences**: Verifier libraries in downstream services must support EdDSA. Documented as a constraint on adding new downstream services.
 
-## 6. Open Questions
+### DD-BFF-06: Redis Outage = No Auth (Fail Closed)
 
-### OQ-BFF-01: Redis Outage Degraded Mode
+**Decision**: When Redis is unreachable, the BFF returns 401 on `/auth/*` mutations and 503 on the readiness probe. There is no local in-memory session cache and no degraded read-only mode.
 
-How long should the BFF accept an existing session cookie when Redis is unreachable? Options: zero tolerance (fail closed immediately); local in-memory verification window for ≤30 s; read-only mode where mutations 503 but reads continue. Decision deferred until SRE confirms Redis HA SLO.
+**Why**:
+- A local cache is expensive to keep coherent across pods -- a revoke on pod A would have to invalidate the cache on every other pod.
+- Coherent session state is the whole reason we keep sessions in Redis. A "best-effort" local cache contradicts that.
+- The Router also fails closed on Redis loss, so a degraded mode in the BFF would not actually let users do anything useful.
 
-### OQ-BFF-02: Recommended Refresh Cadence
+**Consequences**: Redis availability is the auth availability. HA Redis is mandatory in the production Helm values; documented in the operator runbook.
 
-Default `session_ttl` is 120 s, with the SPA expected to call `/auth/refresh` every 60 s. Should the BFF return the next-refresh deadline in the `/auth/refresh` response so the SPA can self-tune? Pending UX input.
+### DD-BFF-07: `/auth/refresh` Returns Next-Refresh Deadline
 
-### OQ-BFF-03: SPA Deep-Link Behavior
+**Decision**: `POST /auth/refresh` returns `200` with a JSON body:
 
-`SameSite=Strict` causes externally followed links (email, Slack) to land logged-out even if a session cookie exists. Should we run a separate `__Host-sidlax` cookie with `SameSite=Lax` solely to recognize the user and trigger a same-site re-auth? Decision needs UX input.
+```json
+{
+  "expires_at": 1714320120,
+  "refresh_at": 1714320060
+}
+```
 
-### OQ-BFF-04: Janitor Coordination
+`expires_at` is the absolute moment the session will expire if not refreshed again. `refresh_at` is the recommended next-refresh moment (`expires_at - safety_margin`, default `safety_margin` = 30 s, configurable).
 
-The janitor uses a Redis lock to elect a single pod per pass. Is that strong enough, or do we need a dedicated CronJob? Pending operational review.
+**Why**:
+- The SPA needs to know when to call refresh next; computing it client-side from `Max-Age` plus a hard-coded fudge factor is fragile and silently goes wrong if the operator changes `session_ttl`.
+- A server-supplied deadline lets the operator tune the cadence without an SPA change.
 
-## 7. Traceability
+**Consequences**: SPA implements a single timer `setTimeout(refresh, refresh_at - now)`. On 401, it redirects to `/auth/login`. The same body is returned by `/auth/me` so the SPA can prime the timer at startup.
+
+### DD-BFF-08: `SameSite=Strict` Today, Pluggable Cookie Classes Later
+
+**Decision**: The session cookie stays `SameSite=Strict` for v1. We accept the deep-link drawback (external links land users on the login page).
+
+**Why**:
+- Strict gives the strongest CSRF baseline.
+- Mixing a Lax companion cookie now would complicate revoke / refresh logic for marginal UX gain at this stage.
+
+**Future**: When we have a real need (e.g. shareable dashboard links, embedded views, or a public read-only token class), we'll introduce a second cookie class with its own attributes and lifecycle, kept separate from the primary session.
+
+### DD-BFF-09: Janitor Coordinates via Redis Lock
+
+**Decision**: A single distributed Redis lock (`bff:lock:janitor`, TTL slightly longer than the pass interval) elects one pod per pass. No external CronJob.
+
+**Why**:
+- One process inside the BFF binary keeps deployment simple -- no extra K8s object to manage or version.
+- Redis is already a hard dependency; reusing it for coordination adds no new failure mode.
+- Pass interval (default 30 s) is short enough that a missed pass costs little.
+
+**Consequences**: Pod with the lock takes the work; others skip. Backlog metric alerts if no pod runs the pass for more than `2 × interval`.
+
+## 6. Traceability
 
 - **PRD**: [PRD.md](./PRD.md)
 - **Sibling**: [Router PRD](../router/PRD.md), [Router DESIGN](../router/DESIGN.md) -- gateway JWT minting, JWKS, `/api/*` proxy, route config
