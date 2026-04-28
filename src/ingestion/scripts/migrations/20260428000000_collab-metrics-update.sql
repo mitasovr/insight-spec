@@ -90,6 +90,8 @@ SELECT
 FROM silver.class_collab_email_activity AS e
 LEFT JOIN insight.people AS p ON lower(e.email) = p.person_id
 WHERE e.data_source = 'insight_m365'
+  AND e.email IS NOT NULL
+  AND e.email != ''
 
 UNION ALL
 SELECT
@@ -98,6 +100,8 @@ SELECT
 FROM silver.class_collab_email_activity AS e
 LEFT JOIN insight.people AS p ON lower(e.email) = p.person_id
 WHERE e.data_source = 'insight_m365'
+  AND e.email IS NOT NULL
+  AND e.email != ''
 
 UNION ALL
 SELECT
@@ -106,6 +110,8 @@ SELECT
 FROM silver.class_collab_email_activity AS e
 LEFT JOIN insight.people AS p ON lower(e.email) = p.person_id
 WHERE e.data_source = 'insight_m365'
+  AND e.email IS NOT NULL
+  AND e.email != ''
 
 -- Meeting metrics: read from silver.class_collab_meeting_activity FINAL
 -- directly (deduped via ReplacingMergeTree). Avoids silver.class_focus_metrics
@@ -130,6 +136,7 @@ SELECT
     )) / 3600.0
 FROM silver.class_collab_meeting_activity AS ma FINAL
 LEFT JOIN insight.people AS p ON lower(ma.email) = p.person_id
+WHERE ma.email IS NOT NULL AND ma.email != ''
 GROUP BY lower(ma.email), p.org_unit_id, ma.date
 
 -- meetings_count: total distinct meetings attended across both sources
@@ -139,6 +146,7 @@ SELECT
     sum(toFloat64(ifNull(ma.meetings_attended, 0)))
 FROM silver.class_collab_meeting_activity AS ma FINAL
 LEFT JOIN insight.people AS p ON lower(ma.email) = p.person_id
+WHERE ma.email IS NOT NULL AND ma.email != ''
 GROUP BY lower(ma.email), p.org_unit_id, ma.date
 
 -- teams_meeting_hours: longest modality per row from M365 source (Teams)
@@ -153,6 +161,8 @@ SELECT
 FROM silver.class_collab_meeting_activity AS ma FINAL
 LEFT JOIN insight.people AS p ON lower(ma.email) = p.person_id
 WHERE ma.data_source = 'insight_m365'
+  AND ma.email IS NOT NULL
+  AND ma.email != ''
 GROUP BY lower(ma.email), p.org_unit_id, ma.date
 
 -- zoom_meeting_hours: same formula, Zoom source only
@@ -167,6 +177,8 @@ SELECT
 FROM silver.class_collab_meeting_activity AS ma FINAL
 LEFT JOIN insight.people AS p ON lower(ma.email) = p.person_id
 WHERE ma.data_source = 'insight_zoom'
+  AND ma.email IS NOT NULL
+  AND ma.email != ''
 GROUP BY lower(ma.email), p.org_unit_id, ma.date
 
 -- teams_meetings: count of distinct M365 (Teams) meetings attended
@@ -177,6 +189,8 @@ SELECT
 FROM silver.class_collab_meeting_activity AS ma FINAL
 LEFT JOIN insight.people AS p ON lower(ma.email) = p.person_id
 WHERE ma.data_source = 'insight_m365'
+  AND ma.email IS NOT NULL
+  AND ma.email != ''
 
 -- zoom_meetings: count of distinct Zoom meetings joined
 UNION ALL
@@ -186,6 +200,8 @@ SELECT
 FROM silver.class_collab_meeting_activity AS ma FINAL
 LEFT JOIN insight.people AS p ON lower(ma.email) = p.person_id
 WHERE ma.data_source = 'insight_zoom'
+  AND ma.email IS NOT NULL
+  AND ma.email != ''
 
 UNION ALL
 SELECT
@@ -194,6 +210,8 @@ SELECT
 FROM silver.class_collab_chat_activity AS c
 LEFT JOIN insight.people AS p ON lower(c.email) = p.person_id
 WHERE c.data_source = 'insight_m365'
+  AND c.email IS NOT NULL
+  AND c.email != ''
 
 UNION ALL
 SELECT
@@ -202,6 +220,8 @@ SELECT
 FROM silver.class_collab_document_activity AS d
 LEFT JOIN insight.people AS p ON lower(d.email) = p.person_id
 WHERE d.data_source = 'insight_m365'
+  AND d.email IS NOT NULL
+  AND d.email != ''
 
 UNION ALL
 SELECT
@@ -210,6 +230,8 @@ SELECT
 FROM silver.class_collab_document_activity AS d
 LEFT JOIN insight.people AS p ON lower(d.email) = p.person_id
 WHERE d.data_source = 'insight_m365'
+  AND d.email IS NOT NULL
+  AND d.email != ''
 
 UNION ALL
 SELECT
@@ -218,6 +240,8 @@ SELECT
 FROM silver.class_collab_document_activity AS d
 LEFT JOIN insight.people AS p ON lower(d.email) = p.person_id
 WHERE d.data_source = 'insight_m365'
+  AND d.email IS NOT NULL
+  AND d.email != ''
 
 -- m365_active_days: any DELIBERATE activity that day across email,
 -- Teams chat, or documents. Counts only actions the user explicitly
@@ -235,6 +259,8 @@ FROM (
         toFloat64(ifNull(sent_count, 0))              AS activity
     FROM silver.class_collab_email_activity
     WHERE data_source = 'insight_m365'
+        AND email IS NOT NULL
+        AND email != ''
 
     UNION ALL
     SELECT
@@ -242,6 +268,8 @@ FROM (
         toFloat64(ifNull(total_chat_messages, 0))
     FROM silver.class_collab_chat_activity
     WHERE data_source = 'insight_m365'
+        AND email IS NOT NULL
+        AND email != ''
 
     UNION ALL
     SELECT
@@ -251,6 +279,8 @@ FROM (
         toFloat64(ifNull(shared_externally_count, 0))
     FROM silver.class_collab_document_activity
     WHERE data_source = 'insight_m365'
+        AND email IS NOT NULL
+        AND email != ''
 ) AS m365_daily
 LEFT JOIN insight.people AS p ON p.person_id = m365_daily.person_id
 GROUP BY person_id, metric_date
@@ -268,6 +298,7 @@ SELECT
     ) = 0, toFloat64(1), toFloat64(0))
 FROM silver.class_collab_meeting_activity AS ma FINAL
 LEFT JOIN insight.people AS p ON lower(ma.email) = p.person_id
+WHERE ma.email IS NOT NULL AND ma.email != ''
 GROUP BY lower(ma.email), p.org_unit_id, ma.date
 
 -- Slack ----------------------------------------------------------------
@@ -278,6 +309,8 @@ SELECT
 FROM silver.class_collab_chat_activity AS s
 LEFT JOIN insight.people AS p ON lower(s.email) = p.person_id
 WHERE s.data_source = 'insight_slack'
+  AND s.email IS NOT NULL
+  AND s.email != ''
 
 UNION ALL
 SELECT
@@ -286,6 +319,8 @@ SELECT
 FROM silver.class_collab_chat_activity AS s
 LEFT JOIN insight.people AS p ON lower(s.email) = p.person_id
 WHERE s.data_source = 'insight_slack'
+  AND s.email IS NOT NULL
+  AND s.email != ''
 
 UNION ALL
 SELECT
@@ -294,6 +329,8 @@ SELECT
 FROM silver.class_collab_chat_activity AS s
 LEFT JOIN insight.people AS p ON lower(s.email) = p.person_id
 WHERE s.data_source = 'insight_slack'
+  AND s.email IS NOT NULL
+  AND s.email != ''
 
 UNION ALL
 SELECT
@@ -304,6 +341,8 @@ SELECT
 FROM silver.class_collab_chat_activity AS s
 LEFT JOIN insight.people AS p ON lower(s.email) = p.person_id
 WHERE s.data_source = 'insight_slack'
+  AND s.email IS NOT NULL
+  AND s.email != ''
 
 UNION ALL
 SELECT
@@ -315,4 +354,6 @@ SELECT
        CAST(NULL AS Nullable(Float64)))
 FROM silver.class_collab_chat_activity AS s
 LEFT JOIN insight.people AS p ON lower(s.email) = p.person_id
-WHERE s.data_source = 'insight_slack';
+WHERE s.data_source = 'insight_slack'
+  AND s.email IS NOT NULL
+  AND s.email != '';
