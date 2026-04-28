@@ -131,9 +131,11 @@ def api_get(path, data):
 # K8s Secret discovery
 # ---------------------------------------------------------------------------
 def discover_secrets():
-    """Discover Insight connector Secrets by label in 'data' namespace."""
+    """Discover Insight connector Secrets by label in the release namespace.
+    Single-namespace model — connector Secrets live alongside the umbrella."""
+    ns = os.environ.get("INSIGHT_NAMESPACE", "insight")
     result = subprocess.run(
-        ["kubectl", "get", "secrets", "-n", "data",
+        ["kubectl", "get", "secrets", "-n", ns,
          "-l", "app.kubernetes.io/part-of=insight", "-o", "json"],
         capture_output=True, text=True, timeout=30
     )
@@ -179,18 +181,21 @@ def discover_secrets():
     return secrets
 
 def resolve_clickhouse_password():
-    """Read password from env var, then K8s Secret. Fails if neither available."""
+    """Read CH password from env var, then from the umbrella's auto-generated
+    `insight-db-creds` Secret in the release namespace. Single-namespace model."""
     env_pass = os.environ.get("CLICKHOUSE_PASSWORD")
     if env_pass:
         return env_pass
+    ns = os.environ.get("INSIGHT_NAMESPACE", "insight")
     result = subprocess.run(
-        ["kubectl", "get", "secret", "clickhouse-credentials", "-n", "data",
-         "-o", "jsonpath={.data.password}"],
+        ["kubectl", "get", "secret", "insight-db-creds", "-n", ns,
+         "-o", "jsonpath={.data.clickhouse-password}"],
         capture_output=True, text=True, timeout=10
     )
     if result.returncode != 0 or not result.stdout.strip():
-        print("ERROR: clickhouse-credentials Secret not found in namespace 'data'", file=sys.stderr)
-        print("  Run: ./secrets/apply.sh --infra-only", file=sys.stderr)
+        print(f"ERROR: insight-db-creds Secret not found in namespace '{ns}'", file=sys.stderr)
+        print("  Either run `helm install insight ...` first (umbrella auto-creates this Secret)", file=sys.stderr)
+        print("  or pre-create it for BYO mode (see deploy/gitops/insight-values.example.yaml).", file=sys.stderr)
         sys.exit(1)
     return base64.b64decode(result.stdout.strip()).decode()
 
