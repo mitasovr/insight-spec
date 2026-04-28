@@ -23,9 +23,13 @@
 --   • One row per (user_id, date). claude_enterprise_users is a daily
 --     snapshot, so we treat it as already aggregated at the (email, day)
 --     grain. No SUM/argMax wrapping needed.
---   • Filter: code_session_count > 0 OR code_lines_added > 0 — drop rows
---     where the user had Enterprise activity but no Code activity that day
---     (avoids polluting class_ai_dev_usage with empty Code rows).
+--   • Filter: code_session_count > 0 OR code_lines_added > 0
+--                                       OR code_tool_accepted_count > 0
+--     drop rows where the user had Enterprise activity but no Code activity
+--     that day (avoids polluting class_ai_dev_usage with empty Code rows).
+--     The third condition catches tool-only days where the user accepted
+--     Edit/Write/MultiEdit/NotebookEdit tool calls without a session/lines
+--     event being attributed.
 
 {{ config(
     materialized='incremental',
@@ -60,8 +64,10 @@ SELECT
     -- represents agentic turns in Cowork (different product surface), not Code agent runs.
     -- Leave NULL until Anthropic exposes a Code-specific agent counter.
     CAST(NULL AS Nullable(UInt32))                                     AS agent_sessions,
-    -- chat_requests on Enterprise covers Claude.ai chat turns, not Code chat. Leave NULL
-    -- here so it doesn't conflate with API-side chat_requests in claude_admin__ai_dev_usage.
+    -- chat_requests: Enterprise has no Code-specific chat counter. Its chat_message_count
+    -- covers Claude.ai chat turns (a different product surface than Code chat in IDEs/CLI),
+    -- so attributing it here would mix surfaces. Leave NULL until Anthropic exposes a
+    -- Code-scoped chat counter.
     CAST(NULL AS Nullable(UInt32))                                     AS chat_requests,
     -- Cost is not surfaced per-user in Enterprise; tied to org subscription, not consumption.
     CAST(NULL AS Nullable(UInt32))                                     AS cost_cents,
