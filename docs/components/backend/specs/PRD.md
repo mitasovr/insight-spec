@@ -630,7 +630,7 @@ All REST APIs **MUST** follow the project API conventions defined in [DNA REST A
 
 **Protocol/Format**: HTTP/REST
 
-**Compatibility**: Transform Service abstracts orchestrator API details behind an adapter. Current orchestrator under evaluation (PR #45 proposes migration from Kestra to Argo Workflows).
+**Compatibility**: Transform Service abstracts orchestrator API details behind an adapter. Argo Workflows is the active orchestrator (see [ADR-0002](../../../domain/ingestion/specs/ADR/0002-argo-over-kestra.md)).
 
 #### SMTP Contract
 
@@ -899,7 +899,7 @@ All REST APIs **MUST** follow the project API conventions defined in [DNA REST A
 | Redpanda | Event streaming for audit events, email requests, cache invalidation | `p1` |
 | MinIO | S3-compatible storage for CSV exports | `p2` |
 | Airbyte | Data extraction platform (connector management via API) | `p1` |
-| Pipeline orchestrator | Scheduling, retries, dbt runs (used by Connector Manager and Transform Service). Currently Kestra; PR #45 evaluates migration to Argo Workflows. | `p1` |
+| Pipeline orchestrator | Scheduling, retries, dbt runs (used by Connector Manager and Transform Service). Argo Workflows. | `p1` |
 | Customer OIDC provider | Authentication | `p1` |
 | Customer HR/directory system | Organizational hierarchy source (AD, BambooHR, Workday, etc.) | `p1` |
 | Customer SMTP server | Email delivery | `p2` |

@@ -83,7 +83,7 @@ The system is deployed as a **standalone product** on Kubernetes via per-service
 | `cpt-insightspec-fr-be-email-delivery` | Email Service consumes from Redpanda, renders templates, delivers via SMTP |
 | `cpt-insightspec-fr-be-oidc-auth` | modkit-auth validates OIDC/JWT tokens from customer IdP |
 | `cpt-insightspec-fr-be-identity-resolution-service` | Identity Resolution Service maps cross-source aliases to canonical person_id, golden record, merge/split |
-| `cpt-insightspec-fr-be-transform-rules` | Transform Service manages dbt model configs, Silver/Gold rules, field mappings, triggers dbt runs via Kestra |
+| `cpt-insightspec-fr-be-transform-rules` | Transform Service manages dbt model configs, Silver/Gold rules, field mappings, triggers dbt runs via Argo Workflows |
 | `cpt-insightspec-fr-be-forward-only-migrations` | Forward-only MariaDB migrations via modkit-db (SeaORM); no rollback scripts |
 | `cpt-insightspec-fr-be-migration-on-startup` | Each service provides migration binary; executed as K8s Job (Helm pre-upgrade hook) before pod rollout |
 | `cpt-insightspec-fr-be-health-checks` | Every service exposes `/health` (liveness) and `/ready` (readiness) via api-gateway; K8s probes configured in Helm |
@@ -142,7 +142,7 @@ graph TB
 
     subgraph Bundled["Bundled Infrastructure"]
         AB[Airbyte]
-        KS[Kestra]
+        KS[Argo Workflows]
         CH[(ClickHouse)]
         MDB[(MariaDB)]
         RD[Redis]
@@ -204,7 +204,7 @@ graph TB
 - **Connector Manager** — connector CRUD, credentials, Airbyte API
 - **Identity Service** — org tree, OIDC mapping, RBAC, HR/directory sync
 - **Identity Resolution Service** — cross-source alias matching, golden records, Silver step 2
-- **Transform Service** — dbt rules, Silver/Gold configs, Kestra orchestration
+- **Transform Service** — dbt rules, Silver/Gold configs, Argo Workflows orchestration
 - **Alerts Service** — metric thresholds, email notifications
 - **Audit Service** — append-only audit trail (ClickHouse)
 - **Email Service** — centralized SMTP delivery (internal, no public API)
@@ -582,11 +582,11 @@ dbt transforms operate on Silver/Gold layers and merge data across multiple conn
 
 ##### Responsibility scope
 
-dbt model configuration CRUD (which Bronze sources map to which `class_*` Silver tables, field mappings, union rules). Gold rule configuration (metric formulas, aggregation windows, dimensions). Dependency graph management (which transforms depend on which connectors). Trigger dbt runs via Kestra API and monitor transform status. Storage: MariaDB (own DB -- transform rules, field mappings, dependency graph). Key tech: modkit-db, modkit-http (Kestra API calls).
+dbt model configuration CRUD (which Bronze sources map to which `class_*` Silver tables, field mappings, union rules). Gold rule configuration (metric formulas, aggregation windows, dimensions). Dependency graph management (which transforms depend on which connectors). Trigger dbt runs via Argo Workflows API and monitor transform status. Storage: MariaDB (own DB -- transform rules, field mappings, dependency graph). Key tech: modkit-db, modkit-http (Argo Workflows API calls).
 
 ##### Responsibility boundaries
 
-Does NOT run dbt directly -- delegates to Kestra. Does NOT manage connector configs or credentials (Connector Manager). Does NOT perform identity resolution across sources (Identity Resolution Service). Does NOT query analytics data for end users (Analytics API).
+Does NOT run dbt directly -- delegates to Argo Workflows. Does NOT manage connector configs or credentials (Connector Manager). Does NOT perform identity resolution across sources (Identity Resolution Service). Does NOT query analytics data for end users (Analytics API).
 
 ##### Related components (by ID)
 
@@ -692,7 +692,7 @@ https://insight.customer.com/
 │   ├── PUT    /gold-rules/{id}                → Update Gold metric rule
 │   ├── DELETE /gold-rules/{id}                → Delete Gold metric rule
 │   ├── GET    /dependencies                   → Get transform dependency graph
-│   ├── POST   /runs/trigger                   → Trigger dbt run via Kestra
+│   ├── POST   /runs/trigger                   → Trigger dbt run via Argo Workflows
 │   └── GET    /runs/{id}/status               → Get dbt run status
 │
 ├── /api/v1/audit/
@@ -722,7 +722,7 @@ All responses use RFC 9457 Problem Details for errors. All list endpoints suppor
 | Identity Resolution Service | Identity Service | HTTP (SDK) | Share person records; org memberships reference resolved person_ids |
 | Transform Service | Identity Resolution Service | Redpanda | Transforms wait for identity resolution before Silver step 2 → Gold |
 | Transform Service | Connector Manager | HTTP (SDK) | Read connector metadata for dependency graph |
-| Transform Service | Kestra | HTTP (modkit-http) | Trigger dbt runs and monitor status |
+| Transform Service | Argo Workflows | HTTP (modkit-http) | Trigger dbt runs and monitor status |
 | All services | Audit Service | Redpanda | Emit audit events |
 | Alerts Service, Connector Manager | Email Service | Redpanda | Emit email requests |
 | Identity Service, Analytics API | All services | Redpanda | Cache invalidation events |
@@ -741,7 +741,7 @@ All responses use RFC 9457 Problem Details for errors. All list endpoints suppor
 | modkit-macros | All services | Domain model macros |
 | modkit-sdk | All services | SDK pattern for inter-module contracts |
 | modkit-security | Analytics, Connector, Identity, Identity Resolution, Alerts, Transform, Audit | Security context |
-| modkit-http | Connector Manager, Transform Service | Outbound calls to Airbyte/Kestra APIs |
+| modkit-http | Connector Manager, Transform Service | Outbound calls to Airbyte/Argo Workflows APIs |
 | api-gateway | Analytics, Connector, Identity, Identity Resolution, Alerts, Transform, Audit | Axum HTTP server, OpenAPI, CORS, rate limiting |
 | authn-resolver | Analytics, Connector, Identity, Identity Resolution, Alerts, Transform, Audit | Authentication resolution |
 | authz-resolver | Analytics, Connector, Identity, Identity Resolution, Alerts, Transform, Audit | Custom plugin for org-tree + RBAC access |
@@ -765,7 +765,7 @@ All responses use RFC 9457 Problem Details for errors. All list endpoints suppor
 | Redis | Caching + rate limiting |
 | Redpanda | Event streaming (Kafka-compatible; replaceable with Kafka) |
 | MinIO | S3-compatible storage for CSV exports |
-| Airbyte + Kestra | Ingestion/orchestration layer (managed by [Ingestion Layer](../../domain/ingestion/specs/DESIGN.md)) |
+| Airbyte + Argo Workflows | Ingestion/orchestration layer (managed by [Ingestion Layer](../../domain/ingestion/specs/DESIGN.md)) |
 | Loki | Log aggregation (Grafana datasource) |
 | Prometheus + Grafana + Alertmanager | Ops monitoring |
 
@@ -1125,7 +1125,7 @@ infra/
 ├── redpanda/
 ├── minio/
 ├── airbyte/
-├── kestra/
+├── argo/
 ├── loki/
 ├── prometheus/
 └── sealed-secrets/
@@ -1212,7 +1212,7 @@ helm install insight insight/insight -f values-override.yaml -n insight --create
 | Alert history | MariaDB | Configurable per tenant (default: 1 year) | Matches audit retention |
 | CSV exports | S3 | 1 week | Auto-expire via S3 lifecycle policy |
 
-Tenant Admin can trigger Silver/Gold rebuild from Bronze via Connector Manager → Kestra/dbt pipeline.
+Tenant Admin can trigger Silver/Gold rebuild from Bronze via Connector Manager → Argo Workflows/dbt pipeline.
 
 ## 6. CI/CD
 

@@ -60,7 +60,7 @@ The Ingestion Layer DESIGN is decomposed into seven features organized around de
   - NodePort services for local access, PVC for data persistence
   - Automatic registration of all connector manifests from `src/ingestion/connectors/`
   - Automatic application of all Terraform connection configs from `src/ingestion/connections/`
-  - Automatic loading of all Kestra flows
+  - Automatic loading of all Argo CronWorkflows
 
 - **Out of scope**:
   - Production Kubernetes Helm deployment (separate feature later)
@@ -304,9 +304,9 @@ The Ingestion Layer DESIGN is decomposed into seven features organized around de
 
 - **Requirements Covered**:
 
-  - [ ] `p1` - `cpt-insightspec-fr-ing-kestra-scheduling`
-  - [ ] `p1` - `cpt-insightspec-fr-ing-kestra-dependency`
-  - [ ] `p2` - `cpt-insightspec-fr-ing-kestra-retry`
+  - [ ] `p1` - `cpt-insightspec-fr-ing-argo-scheduling`
+  - [ ] `p1` - `cpt-insightspec-fr-ing-argo-dependency`
+  - [ ] `p2` - `cpt-insightspec-fr-ing-argo-retry`
   - [ ] `p1` - `cpt-insightspec-usecase-ing-scheduled-run`
   - [ ] `p2` - `cpt-insightspec-nfr-ing-observability`
 
@@ -426,7 +426,7 @@ The Ingestion Layer DESIGN is decomposed into seven features organized around de
   - `src/ingestion/connectors/collaboration/m365/dbt/schema.yml` — column docs + tests
   - `src/ingestion/connectors/collaboration/m365/.env.local.example` — credential template
   - Terraform connection config for m365
-  - Kestra flow template for m365
+  - Argo CronWorkflow template for m365
 
 - **Out of scope**:
   - Other connectors (GitHub, GitLab, Jira, etc.)
