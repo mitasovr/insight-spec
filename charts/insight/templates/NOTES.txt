@@ -41,9 +41,14 @@ Next steps:
 
   3. Docs: https://github.com/cyberfabric/insight
 
-{{ if not .Values.apiGateway.oidc.existingSecret -}}
-⚠  WARNING: apiGateway.oidc.existingSecret is empty. For production set
-            existingSecret or inline issuer/clientId/redirectUri.
+{{- /* Only warn when auth is enabled, no existingSecret is set,
+       and inline issuer is also empty — i.e. operator hasn't picked
+       any of the three valid OIDC paths. */ -}}
+{{- $oid := default dict .Values.apiGateway.oidc -}}
+{{ if and (not .Values.apiGateway.authDisabled) (not $oid.existingSecret) (not $oid.issuer) -}}
+⚠  WARNING: OIDC is not configured. For production set either
+            apiGateway.oidc.existingSecret OR all four inline fields
+            (issuer + audience + clientId + redirectUri).
 {{- end }}
 
 {{- if .Values.credentials.autoGenerate }}

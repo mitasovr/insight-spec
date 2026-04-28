@@ -45,13 +45,16 @@ fi
 NS="${INSIGHT_NAMESPACE:-insight}"
 cat <<EOF
 
-╔════════════════════════════════════════════════════════════════════════╗
-║   All done.                                                            ║
-║                                                                        ║
-║   Airbyte UI:    kubectl -n $NS port-forward svc/airbyte-airbyte-webapp-svc 8080:80
-║   Insight UI:    kubectl -n $NS port-forward svc/insight-frontend 8081:80
-║                                                                        ║
-║   Open http://localhost:8081 in your browser.                          ║
-╚════════════════════════════════════════════════════════════════════════╝
+══════════════════════════════════════════════════════════════════════════
+   All done.
+
+   Airbyte UI:
+     kubectl -n $NS port-forward svc/airbyte-airbyte-webapp-svc 8080:80
+
+   Insight UI:
+     kubectl -n $NS port-forward svc/insight-frontend 8081:80
+
+   Open http://localhost:8081 in your browser.
+══════════════════════════════════════════════════════════════════════════
 
 EOF

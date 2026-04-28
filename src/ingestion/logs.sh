@@ -63,8 +63,10 @@ if jobs:
     print(jobs[0]['job']['id'])
 " 2>/dev/null)
     if [[ -z "$job_id" ]]; then
-      echo "No Airbyte jobs found" >&2
-      exit 1
+      # Soft no-op rather than exit 1 — empty job list is a normal
+      # state on fresh installs (no syncs run yet), not an error.
+      echo "No Airbyte jobs found (run a sync first)." >&2
+      exit 0
     fi
     echo "Latest Airbyte job: $job_id" >&2
   fi

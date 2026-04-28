@@ -101,7 +101,11 @@ The shipped manifests hardcode `insight` for simplicity. To target a different n
 
 ```bash
 # 1. In your fork — bump the chart version
-sed -i '' 's/targetRevision: 0.1.0/targetRevision: 0.2.0/' insight-application.yaml
+# Portable across BSD/GNU sed: write the result to a tempfile, then
+# overwrite. (`sed -i ''` is BSD-only; `sed -i` without an arg is
+# GNU-only — there is no portable in-place flag.)
+sed 's/targetRevision: 0.1.0/targetRevision: 0.2.0/' insight-application.yaml > insight-application.yaml.tmp \
+  && mv insight-application.yaml.tmp insight-application.yaml
 
 # 2. PR → merge → ArgoCD syncs automatically
 # (or manual sync via UI / argocd CLI)
