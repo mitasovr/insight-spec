@@ -17,9 +17,20 @@
 --                              maps api_key_id → person_id.
 --
 -- Note: Claude Code usage is also present in Enterprise data
--- (claude_enterprise_users.code_*) but we source it exclusively from Admin per
--- the lead's rule — data available in common Admin API is always sourced
--- from there to avoid double counting.
+-- (claude_enterprise_users.code_*). For orgs on the Enterprise subscription,
+-- Enterprise is now the canonical feed for class_ai_dev_usage — see
+-- claude_enterprise__ai_dev_usage.sql. Admin's claude_admin_code_usage is
+-- retained here only to keep the staging table populated for downstream
+-- joins / debugging; it is no longer tagged for silver:class_ai_dev_usage,
+-- so it does not double-count via union_by_tag. Admin remains tagged for
+-- silver:class_ai_api_usage (token-level metrics Enterprise does not publish).
+--
+-- Why prefer Enterprise here:
+--   • user-grain attribution out of the box (user_email) — Admin reports
+--     api_actor for 100% of activity in real-world data, requiring an extra
+--     api_key_name → api_key_id → person_id resolution step.
+--   • Enterprise also exposes adjacent surfaces (chat, cowork, office)
+--     that Admin's code_usage endpoint does not.
 --
 -- Aggregation: Bronze has one row per (date, actor_identifier, terminal_type)
 -- — we aggregate across terminal_type to match class_ai_dev_usage granularity
@@ -29,7 +40,7 @@
     unique_key='unique_key',
     order_by=['unique_key'],
     schema='staging',
-    tags=['claude-admin', 'silver:class_ai_dev_usage']
+    tags=['claude-admin']
 ) }}
 
 WITH usage_agg AS (
