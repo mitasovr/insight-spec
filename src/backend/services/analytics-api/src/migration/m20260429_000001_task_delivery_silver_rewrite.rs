@@ -1,13 +1,13 @@
-//! Task Delivery silver-only rewrite — update query_ref for
+//! Task Delivery silver-only rewrite — update `query_ref` for
 //! `TEAM_BULLET_DELIVERY` (UUID …03) and `IC_BULLET_DELIVERY` (UUID …11)
-//! to know about the expanded metric_key set emitted by the rewritten
+//! to know about the expanded `metric_key` set emitted by the rewritten
 //! `insight.task_delivery_bullet_rows` view.
 //!
-//! Preserved metric_keys (5):
+//! Preserved `metric_keys` (5):
 //!   `tasks_completed`, `task_dev_time`, `task_reopen_rate`,
 //!   `due_date_compliance`, `estimation_accuracy`
 //!
-//! New metric_keys (4):
+//! New `metric_keys` (4):
 //!   `worklog_logging_accuracy` — folded symmetric around 100 (raw daily
 //!                                ratio = worklog ÷ time-in-dev-statuses).
 //!   `bugs_to_task_ratio`       — default `avg(metric_value)`.
@@ -24,10 +24,10 @@
 //!
 //! Paired with CH migration `20260429000000_task-delivery-silver-
 //! rewrite.sql` which redefines `insight.jira_closed_tasks` as a
-//! silver-derived VIEW (was a MergeTree TABLE) and rewrites
-//! `insight.task_delivery_bullet_rows` to emit 9 metric_keys instead
+//! silver-derived VIEW (was a `MergeTree` TABLE) and rewrites
+//! `insight.task_delivery_bullet_rows` to emit 9 `metric_keys` instead
 //! of 5. CH and Rust must apply together; until both land the new
-//! bullets render as ComingSoon.
+//! bullets render as `ComingSoon`.
 
 use sea_orm_migration::prelude::*;
 
@@ -42,21 +42,21 @@ const FOLD_LIST: &str = "'estimation_accuracy', 'worklog_logging_accuracy'";
 const MEDIAN_LIST: &str =
     "'mean_time_to_resolution', 'task_dev_time', 'pickup_time', 'flow_efficiency'";
 /// Time-bound metrics whose distribution has a long right tail. Use P95
-/// for the chart range_max instead of `max()` so a single year-old issue
+/// for the chart `range_max` instead of `max()` so a single year-old issue
 /// closed in-window doesn't blow the gauge scale to 600d.
 const P95_LIST: &str = "'mean_time_to_resolution', 'task_dev_time', 'pickup_time'";
 
-/// `multiIf` body for the inner per-(metric_key, person_id) aggregate.
+/// `multiIf` body for the inner per-(`metric_key`, `person_id`) aggregate.
 ///
 /// Special branches:
 ///  - `task_reopen_rate`: bullet rows are tagged with sign — +1 per close
-///    event, -1 per reopen event — both scoped to the OData period.
+///    event, -1 per reopen event — both scoped to the `OData` period.
 ///    Rate = -sum(neg)/sum(pos) × 100, NULL until at least 5 closures
 ///    accumulate (low-N denominators read as 100% and dominate).
-///  - SUM_LIST: period total.
-///  - MEDIAN_LIST: per-person median across the period — robust against
+///  - `SUM_LIST`: period total.
+///  - `MEDIAN_LIST`: per-person median across the period — robust against
 ///    a single year-old issue closed in-window.
-///  - FOLD_LIST: symmetric folding around 100 (raw daily ratios fold to
+///  - `FOLD_LIST`: symmetric folding around 100 (raw daily ratios fold to
 ///    a 0..100 accuracy).
 fn inner_v_period() -> String {
     format!(
@@ -122,11 +122,11 @@ impl MigrationTrait for Migration {
     /// `insight.task_delivery_bullet_rows` to emit a different
     /// `metric_key` set and replaces `insight.jira_closed_tasks` with a
     /// VIEW. Restoring `metrics.query_ref` here without first reverting
-    /// the CH migration would leave queries pointing at metric_keys the
+    /// the CH migration would leave queries pointing at `metric_keys` the
     /// view no longer emits — bullets would silently render
-    /// ComingSoon. Roll back by re-running the previous CH migrations
+    /// `ComingSoon`. Roll back by re-running the previous CH migrations
     /// (`20260423120000_bullet-views-honest-nulls.sql` plus
-    /// `20260422000000_gold-views.sql` to restore the MergeTree table)
+    /// `20260422000000_gold-views.sql` to restore the `MergeTree` table)
     /// before reverting `metrics.query_ref`.
     async fn down(&self, _manager: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom(
