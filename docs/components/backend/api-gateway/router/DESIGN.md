@@ -382,7 +382,7 @@ Does not run rotation policy itself -- the operator triggers rotation by editing
 - `cpt-insightspec-component-router-jwt-minter` -- consumer of signing keys.
 - `cpt-insightspec-component-router-jwks` -- consumer of public keys.
 
-> **Note on cache invalidation**: There is no Router-side subscriber. The Router and BFF share the same Redis instance, so the BFF's revoke flow performs `DEL router:jwt_cache:{sid}` directly inside the same Lua script that drops the session record. No Redpanda, no in-process callback, no eventual-consistency window beyond the single Redis round-trip.
+> **Note on cache invalidation**: There is no Router-side subscriber. The Router and BFF share the same Redis instance, so the BFF's revoke flow performs `DEL router:jwt_cache:{sid}` directly inside the same MULTI/EXEC pipeline that drops the session record. No Redpanda, no in-process callback, no eventual-consistency window beyond the single Redis round-trip.
 
 ### 3.3 API Contracts
 

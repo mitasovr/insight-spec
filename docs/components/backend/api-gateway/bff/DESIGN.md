@@ -68,10 +68,10 @@ The BFF is built on **cyberfabric-core ModKit** (same framework as the rest of t
 |---|---|
 | `cpt-insightspec-fr-bff-oidc-login` | Confidential OIDC client with PKCE; tokens stored in Redis only |
 | `cpt-insightspec-fr-bff-session-cookie` | `__Host-`-prefixed opaque session ID with short configurable TTL, set on `/auth/callback` |
-| `cpt-insightspec-fr-bff-session-refresh` | `POST /auth/refresh` runs Lua script that extends `bff:session:{id}` and updates `ZADD` score |
+| `cpt-insightspec-fr-bff-session-refresh` | `POST /auth/refresh` runs `HMGET` + `MULTI`/`EXEC` pipeline that extends `bff:session:{id}` TTL and updates `ZADD` score |
 | `cpt-insightspec-fr-bff-session-store` | `bff:session:{id}` HASH + `bff:user_sessions:{user_id}` ZSET with score = `expires_at` |
 | `cpt-insightspec-fr-bff-session-list` | `ZRANGEBYSCORE bff:user_sessions:{uid} <now> +inf` |
-| `cpt-insightspec-fr-bff-session-revoke` | Single Lua script removes session record(s), `ZREM` from index, and `DEL router:jwt_cache:{sid}` in one round-trip |
+| `cpt-insightspec-fr-bff-session-revoke` | `HMGET` + `MULTI`/`EXEC` pipeline removes session record(s), `ZREM` from index, `SREM` from `sid_index`, and `DEL router:jwt_cache:{sid}` in one round-trip |
 | `cpt-insightspec-fr-bff-gateway-jwt` | Claim contract owned here; minting performed by Router |
 | `cpt-insightspec-fr-bff-logout` | `/auth/logout` for local + RP-initiated; `/auth/oidc/back-channel-logout` for IdP-initiated |
 | `cpt-insightspec-fr-bff-csrf` | Double-submit token bound to session ID + `Origin` allowlist |
@@ -267,7 +267,7 @@ Create, read, refresh, list-by-user, revoke (single, all-but-current, all). Keep
 - **Create** — single `MULTI`/`EXEC` pipeline (`HSET` + `EXPIREAT` + `ZADD` + `SADD`). No conditional logic, no read-then-write, so no Lua. See §3.6 Login.
 - **Refresh** — single `HMGET` + `MULTI`/`EXEC` pipeline (`HSET expires_at` + `EXPIREAT` + `ZADD`). Parallel refreshes converge on the same `new_exp` ±1 s — no CAS, no lock. See §3.6 Session Refresh.
 - **Revoke (single)** — `HMGET` to read `user_id`, `idp_iss`, `idp_sid`, then a `MULTI`/`EXEC` pipeline of four deletes (`DEL bff:session` + `ZREM bff:user_sessions` + `SREM bff:sid_index` + `DEL router:jwt_cache`). Idempotent: revoking an already-revoked session is silently a no-op. See §3.6 Logout / Back-Channel.
-- **Revoke (user)** — atomicity mechanism documented per-op in §3.6. (Specifics under review.)
+- **Revoke (user)** — `ZRANGE bff:user_sessions:{user_id} 0 -1` to enumerate, pipelined `HMGET` on each session for `(idp_iss, idp_sid)`, then one `MULTI`/`EXEC` pipeline that `DEL`s every `bff:session:{sid}` and `router:jwt_cache:{sid}`, `SREM`s each entry from `bff:sid_index:*`, and finally `DEL`s the whole `bff:user_sessions:{user_id}` index. A parallel login during the op survives the revoke — accepted as standard "log out everywhere" semantics. See §3.6 Logout Everywhere.
 
 ##### Responsibility boundaries
 Does not call the OIDC provider. Does not authenticate requests by itself -- callers (Auth Controller, Router) do. Does not own the cookie format.
@@ -488,12 +488,14 @@ sequenceDiagram
     participant R as Redis
 
     U->>B: DELETE /auth/sessions
-    B->>R: ZRANGEBYSCORE bff:user_sessions:{uid} <now> +inf
-    R-->>B: [sid1, sid2, sid3, ...]
-    B->>R: EVAL revoke_user.lua<br/>DEL bff:session:{sid_1..N}<br/>DEL bff:user_sessions:{uid}<br/>DEL router:jwt_cache:{sid_1..N}
-    R-->>B: count revoked
+    B->>R: ZRANGE bff:user_sessions:{uid} 0 -1
+    R-->>B: [sid_1, sid_2, ..., sid_N]
+    B->>R: pipelined HMGET bff:session:{sid_i} idp_iss idp_sid<br/>(for each sid_i)
+    R-->>B: [(iss_1, idp_sid_1), ..., (iss_N, idp_sid_N)]
+    B->>R: MULTI<br/>DEL bff:session:{sid_1..N}<br/>SREM bff:sid_index:{iss_i}:{idp_sid_i} {sid_i}  (per i)<br/>DEL router:jwt_cache:{sid_1..N}<br/>DEL bff:user_sessions:{uid}<br/>EXEC
+    R-->>B: replies
     B-->>U: 204 + Set-Cookie __Host-sid Max-Age=0
-    Note over B: Within ≤300s all in-flight gateway JWTs expire.
+    Note over B: Within ≤300s all in-flight gateway JWTs expire.<br/>A login that races this op survives — accepted as<br/>standard "log out everywhere" semantics.
 ```
 
 #### Back-Channel Logout from IdP
@@ -600,7 +602,7 @@ graph LR
 - `ZRANGEBYSCORE bff:user_sessions:{uid} 0 <now>` returns expired ones (for the janitor).
 - `ZREMRANGEBYSCORE bff:user_sessions:{uid} 0 <now>` cleans them in one call.
 
-**Maintenance**: Mutated together with `bff:session:*` in a single MULTI/EXEC pipeline (create, refresh) or in a per-op atomicity model documented in §3.6 (revoke).
+**Maintenance**: Mutated together with `bff:session:*` inside a single MULTI/EXEC pipeline for every op (create, refresh, revoke single, revoke user). No Lua scripts -- see §3.6 sequence diagrams.
 
 #### Key: `bff:sid_index:{iss}:{idp_sid}`
 
@@ -694,7 +696,7 @@ flowchart LR
 | Concern | Owner | Notes |
 |---|---|---|
 | OIDC handshake | BFF | Router never talks to the IdP |
-| Session create / refresh / revoke | BFF | Owns the Lua scripts |
+| Session create / refresh / revoke | BFF | All ops are HMGET + MULTI/EXEC pipelines; no Lua. See §3.6 sequence diagrams. |
 | Cookie issue / clear | BFF | Router never sets cookies |
 | CSRF token issue | BFF | Router enforces nothing CSRF-related on `/api/*` (relies on `SameSite=Strict`) |
 | IdP access-token refresh | _(not in v1)_ | Tokens stored at login are not refreshed; v1 never calls IdP-protected APIs on the user's behalf. |

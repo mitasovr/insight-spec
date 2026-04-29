@@ -229,7 +229,7 @@ The system **MUST**:
 4. **Make create / refresh / revoke atomic** -- a partial failure **MUST NOT** leave the session record and the indexes out of sync.
 5. **Run a periodic janitor** that removes expired entries from the user-session index and emits a metric on any drift between the index and the underlying session records.
 
-The exact Redis schema (field list, sorted-set scoring, atomicity mechanism, janitor interval and Lua scripts) is specified in [DESIGN §3.7](./DESIGN.md#37-database-schemas--tables). The PRD only states *what* must hold; *how* it is implemented is the DESIGN's job.
+The exact Redis schema (field list, sorted-set scoring, atomicity mechanism, janitor interval) is specified in [DESIGN §3.7](./DESIGN.md#37-database-schemas--tables). The PRD only states *what* must hold; *how* it is implemented is the DESIGN's job.
 
 **Rationale**: Server-side storage is what makes sessions revocable. The per-user index is what makes "list devices" and "revoke all" fast. The IdP-sid index is what makes back-channel logout work. Atomicity prevents zombie sessions. The janitor keeps the index honest.
 
@@ -578,4 +578,4 @@ JWKS publication and `/api/*` reverse proxy live on the [Router](../router/PRD.m
 | Janitor falls behind | `bff:user_sessions:*` accumulates expired entries | Metric on backlog size; alert when above threshold; pass interval is shorter than session TTL |
 | Back-channel logout endpoint abuse | Spoofed logout tokens trigger session revocation | Strict OIDC `logout_token` validation: signature, `iss`, `aud`, `iat`, `events`. `jti` replay protection via `bff:logout_jti:{iss}:{jti}` SET-NX with TTL ≥ `iat + max_clock_skew`. |
 | `logout_token` without `sid` widens blast radius | A misconfigured IdP that omits `sid` causes every back-channel logout to behave as "log out everywhere" for the named `sub` | Runbook callout; operator-facing log line on every `(iss, sub)`-only fallback so the pattern is detectable |
-| User-sessions index drift | Index lists sessions that no longer exist (or vice versa) | Atomic ops via Lua script; janitor reconciles |
+| User-sessions index drift | Index lists sessions that no longer exist (or vice versa) | Atomic ops via MULTI/EXEC pipeline; janitor reconciles |

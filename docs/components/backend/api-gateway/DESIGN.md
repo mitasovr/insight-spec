@@ -94,7 +94,7 @@ Detailed component models, sequence diagrams, and data models live in the module
 | Concern | Owner | Notes |
 |---|---|---|
 | OIDC handshake | BFF | Router never talks to the IdP |
-| Session create / refresh / revoke | BFF | Per-op Redis primitive: pipeline (create / refresh) + (revoke under review) |
+| Session create / refresh / revoke | BFF | All ops are HMGET + MULTI/EXEC pipelines; no Lua scripts |
 | Cookie issue / clear | BFF | Router never sets cookies |
 | CSRF token issue & verify on `/auth/*` | BFF | Router relies on `SameSite=Strict` for `/api/*` |
 | IdP access-token refresh | _(not in v1)_ | Tokens not stored or refreshed; v1 never calls IdP-protected APIs on the user's behalf. |
