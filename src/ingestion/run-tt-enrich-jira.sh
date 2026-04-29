@@ -3,9 +3,9 @@ set -euo pipefail
 
 # Run only the Silver transformations for Jira on bronze data that's already in ClickHouse.
 # Steps (no Airbyte sync):
-#   1. dbt run --select jira        — builds per-source staging models (staging.jira__*)
-#   2. jira-enrich                  — rust binary writes staging.jira__task_field_history
-#   3. dbt run --select tag:silver  — unions staging into silver.class_task_* via union_by_tag
+#   1. dbt run --select tag:jira                     — builds per-source staging models (staging.jira__*)
+#   2. jira-enrich                                   — rust binary writes staging.jira__task_field_history
+#   3. dbt run --select tag:silver,tag:jira+         — unions staging into silver.class_task_* via union_by_tag
 #
 # Usage:
 #   ./run-tt-enrich-jira.sh <tenant> [<insight_source_id>]
@@ -98,7 +98,7 @@ spec:
             arguments:
               parameters:
                 - name: dbt_select
-                  value: "tag:silver"
+                  value: "tag:silver,tag:jira+"
 EOF
 
 echo

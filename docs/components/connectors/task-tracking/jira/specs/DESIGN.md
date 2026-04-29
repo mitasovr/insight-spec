@@ -87,7 +87,7 @@ Every emitted record includes `tenant_id` and `source_id` for multi-tenant isola
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Orchestrator / Scheduler (Kestra / Airbyte)                        │
+│  Orchestrator / Scheduler (Argo Workflows / Airbyte)                │
 │  (triggers Jira connector sync)                                     │
 └─────────────────────────────┬───────────────────────────────────────┘
                               │
@@ -114,7 +114,7 @@ Every emitted record includes `tenant_id` and `source_id` for multi-tenant isola
 
 | Layer | Responsibility | Technology |
 |-------|---------------|------------|
-| Orchestration | Trigger, schedule, state management | Kestra / Airbyte platform |
+| Orchestration | Trigger, schedule, state management | Argo Workflows / Airbyte platform |
 | Collection | REST pagination, JQL queries, cursor management, retry | Airbyte DeclarativeSource (YAML manifest) |
 | Transformation | `AddFields` for `tenant_id`, `source_id`, `unique_key` injection (per spec §4.6); DPath extraction | Declarative transformations |
 | Storage | Upsert to Bronze tables | ClickHouse `ReplacingMergeTree(_version)` |

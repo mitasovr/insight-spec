@@ -298,7 +298,7 @@ Connectors **MUST** support incremental extraction using Airbyte's cursor-based 
 
 #### Pipeline Scheduling
 
-- [ ] `p1` - **ID**: `cpt-insightspec-fr-ing-kestra-scheduling`
+- [ ] `p1` - **ID**: `cpt-insightspec-fr-ing-argo-scheduling`
 
 Argo Workflows **MUST** schedule ingestion pipelines via CronWorkflows with configurable cron expressions. Each pipeline **MUST** define the complete extract-transform cycle for one or more connectors. Schedules are declared in connector `descriptor.yaml`.
 
@@ -308,7 +308,7 @@ Argo Workflows **MUST** schedule ingestion pipelines via CronWorkflows with conf
 
 #### Task Dependency Management
 
-- [ ] `p1` - **ID**: `cpt-insightspec-fr-ing-kestra-dependency`
+- [ ] `p1` - **ID**: `cpt-insightspec-fr-ing-argo-dependency`
 
 Argo Workflows **MUST** enforce task ordering via DAG templates: Airbyte sync **MUST** complete successfully before dbt transformation begins. Multiple independent syncs **MAY** run in parallel.
 
@@ -318,7 +318,7 @@ Argo Workflows **MUST** enforce task ordering via DAG templates: Airbyte sync **
 
 #### Retry on Failure
 
-- [ ] `p2` - **ID**: `cpt-insightspec-fr-ing-kestra-retry`
+- [ ] `p2` - **ID**: `cpt-insightspec-fr-ing-argo-retry`
 
 Argo Workflows **SHOULD** retry failed tasks (Airbyte sync or dbt run) with configurable retry count and backoff strategy via `retryStrategy`.
 

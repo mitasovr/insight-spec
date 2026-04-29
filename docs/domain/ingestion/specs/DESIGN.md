@@ -60,8 +60,8 @@ This layer replaces the previously designed custom Orchestrator and custom Conne
 | `cpt-insightspec-fr-ing-cdk-connector` | Airbyte Python CDK with custom Docker images |
 | `cpt-insightspec-fr-ing-tenant-id` | `AddFields` transformation in manifests; explicit injection in CDK `read_records()` |
 | `cpt-insightspec-fr-ing-incremental-sync` | Airbyte cursor-based incremental sync with persisted state |
-| `cpt-insightspec-fr-ing-kestra-scheduling` | Argo CronWorkflows with cron triggers for scheduled execution |
-| `cpt-insightspec-fr-ing-kestra-dependency` | Argo DAG templates with explicit task dependencies: sync -> dbt |
+| `cpt-insightspec-fr-ing-argo-scheduling` | Argo CronWorkflows with cron triggers for scheduled execution |
+| `cpt-insightspec-fr-ing-argo-dependency` | Argo DAG templates with explicit task dependencies: sync -> dbt |
 | `cpt-insightspec-fr-ing-bronze-storage` | ClickHouse `ReplacingMergeTree` with Airbyte stream name as table name |
 | `cpt-insightspec-fr-ing-dbt-bronze-to-silver` | Per-package dbt models producing `class_{domain}` tables |
 | `cpt-insightspec-fr-ing-terraform-connections` | Airbyte Terraform provider for connection management |
@@ -761,7 +761,7 @@ How are connector packages versioned within the monorepo? Is there a version fie
 | Design Element | PRD Requirement |
 |---------------|----------------|
 | `cpt-insightspec-component-ing-airbyte` | `cpt-insightspec-fr-ing-airbyte-extract`, `cpt-insightspec-fr-ing-nocode-connector`, `cpt-insightspec-fr-ing-cdk-connector` |
-| `cpt-insightspec-component-ing-argo` | `cpt-insightspec-fr-ing-kestra-scheduling`, `cpt-insightspec-fr-ing-kestra-dependency`, `cpt-insightspec-fr-ing-kestra-retry` |
+| `cpt-insightspec-component-ing-argo` | `cpt-insightspec-fr-ing-argo-scheduling`, `cpt-insightspec-fr-ing-argo-dependency`, `cpt-insightspec-fr-ing-argo-retry` |
 | `cpt-insightspec-component-ing-dbt` | `cpt-insightspec-fr-ing-dbt-bronze-to-silver`, `cpt-insightspec-fr-ing-dbt-clickhouse`, `cpt-insightspec-fr-ing-silver-unified-schema` |
 | `cpt-insightspec-component-ing-clickhouse` | `cpt-insightspec-fr-ing-bronze-storage`, `cpt-insightspec-fr-ing-clickhouse-destination` |
 | `cpt-insightspec-component-ing-terraform` | `cpt-insightspec-fr-ing-terraform-connections` |

@@ -314,7 +314,7 @@ Features reference DESIGN component IDs (`cpt-insightspec-component-be-*`) and P
   - Bootstrap: root tenant + initial Tenant Admin seeded from Helm values
 
 - **Out of scope**:
-  - Redpanda, MinIO, Airbyte, Kestra subcharts (pre-existing, not managed by this chart)
+  - Redpanda, MinIO, Airbyte, Argo Workflows subcharts (pre-existing, not managed by this chart)
   - HPA, observability stack (v0.7)
 
 - **Requirements Covered**:

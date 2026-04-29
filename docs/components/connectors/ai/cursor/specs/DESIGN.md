@@ -736,7 +736,7 @@ Package: src/ingestion/connectors/ai/cursor/
 └── dbt/ (Bronze → Silver)
 
 Connection A: cursor-{team_name}-hourly
-├── Schedule: hourly (via Kestra cron)
+├── Schedule: hourly (via Argo CronWorkflow)
 ├── Source image: airbyte/source-declarative-manifest
 ├── Source config: {tenant_id, api_key}
 ├── Streams: cursor_members, cursor_audit_logs, cursor_usage_events,
@@ -745,7 +745,7 @@ Connection A: cursor-{team_name}-hourly
 └── State: per-stream cursors
 
 Connection B: cursor-{team_name}-daily-resync
-├── Schedule: daily after 12:08 UTC (via Kestra cron)
+├── Schedule: daily after 12:08 UTC (via Argo CronWorkflow)
 ├── Source image: airbyte/source-declarative-manifest
 ├── Source config: {tenant_id, api_key}
 ├── Streams: cursor_usage_events_daily_resync (only)
@@ -848,7 +848,7 @@ The connector implements a dual-schedule sync for usage events via two streams a
 | Component | Connection A (hourly) | Connection B (daily resync) |
 |-----------|----------------------|----------------------------|
 | **Stream** | `cursor_usage_events` | `cursor_usage_events_daily_resync` |
-| **Schedule** | Hourly (Kestra cron) | Daily after 12:08:04 UTC (Kestra cron) |
+| **Schedule** | Hourly (Argo CronWorkflow) | Daily after 12:08:04 UTC (Argo CronWorkflow) |
 | **Lookback** | Incremental from cursor | Always previous day: `day_delta(-1, format='%Y-%m-%dT12:08:04Z')` → `day_delta(0, format='%Y-%m-%dT12:08:04Z')` |
 | **Purpose** | Near-real-time event visibility | Capture retroactive cost adjustments |
 | **Bronze table** | `cursor_usage_events` | `cursor_usage_events_daily_resync` |
