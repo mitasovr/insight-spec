@@ -21,6 +21,7 @@
     materialized='incremental',
     unique_key='unique_key',
     order_by=['unique_key'],
+    on_schema_change='sync_all_columns',
     settings={'allow_nullable_key': 1},
     schema='staging',
     tags=['cursor', 'silver:class_ai_dev_usage']

@@ -24,6 +24,7 @@
     materialized='incremental',
     unique_key='unique_key',
     order_by=['unique_key'],
+    on_schema_change='sync_all_columns',
     schema='staging',
     tags=['claude-admin', 'silver:class_ai_api_usage']
 ) }}
