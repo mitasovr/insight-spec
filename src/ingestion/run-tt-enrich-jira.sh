@@ -11,114 +11,55 @@ set -euo pipefail
 # clickhouse_host/port/user, batch_size) come from WorkflowTemplate defaults —
 # see charts/insight/templates/ingestion/{dbt-run,tt-enrich-jira-run}.yaml.
 #
-# Usage:
-#   ./run-tt-enrich-jira.sh <tenant> [<insight_source_id>]
+# Required env:
+#   KUBECONFIG          path to the insight cluster kubeconfig
+#   INSIGHT_NAMESPACE   release namespace of the umbrella chart
 #
-# When <insight_source_id> is omitted, it is read from the Jira Secret
-# annotation `insight.cyberfabric.com/source-id` in the release namespace.
+# Required args:
+#   <tenant>            tenant identifier
+# Optional args:
+#   <insight_source_id> when set, used directly; otherwise resolved from the
+#                       Jira Secret annotations.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+: "${KUBECONFIG:?must be set, e.g. export KUBECONFIG=~/.kube/insight.kubeconfig}"
+: "${INSIGHT_NAMESPACE:?must be set to the umbrella release namespace, e.g. export INSIGHT_NAMESPACE=insight}"
+export KUBECONFIG INSIGHT_NAMESPACE
 
 TENANT="${1:?Usage: $0 <tenant> [<insight_source_id>]}"
 SOURCE_ID="${2:-}"
 
-NAMESPACE="${INSIGHT_NAMESPACE:-insight}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/insight.kubeconfig}"
+source "airbyte-toolkit/lib/secrets.sh"
 
-# ─── Resolve insight_source_id from Secret annotation ───────────────────
-# Single-namespace model: connector Secrets live in the same namespace as
-# the umbrella (default `insight`). Multi-tenant clusters use multiple
-# namespaces; we filter by tenant to avoid picking the wrong source.
+# ─── Resolve insight_source_id from Secret annotations ──────────────────
 if [[ -z "$SOURCE_ID" ]]; then
-  SOURCE_ID=$(TENANT="$TENANT" \
-    kubectl get secret -n "$NAMESPACE" -l app.kubernetes.io/part-of=insight -o json \
-    | python3 -c "
-import json, os, sys
-tenant = os.environ['TENANT']
-matches = []
-for s in json.load(sys.stdin).get('items', []):
-    ann = (s.get('metadata') or {}).get('annotations') or {}
-    if ann.get('insight.cyberfabric.com/connector') != 'jira':
-        continue
-    # tenant annotation optional — if missing, accept any tenant the caller asked for
-    sec_tenant = ann.get('insight.cyberfabric.com/tenant', tenant)
-    if sec_tenant != tenant:
-        continue
-    sid = ann.get('insight.cyberfabric.com/source-id', '')
-    if sid:
-        matches.append(sid)
-if len(matches) == 1:
-    print(matches[0])
-elif len(matches) > 1:
-    sys.stderr.write(f'ERROR: multiple Jira secrets match tenant {tenant}: {matches}\n')
-    sys.exit(2)
-" 2>/dev/null)
+  SOURCE_ID=$(resolve_source_id "jira" "$TENANT")
 fi
 [[ -n "$SOURCE_ID" ]] || {
-  echo "ERROR: could not resolve insight_source_id for tenant '$TENANT'." >&2
-  echo "       Pass it explicitly as the second argument." >&2
+  echo "ERROR: could not resolve insight_source_id for jira tenant '$TENANT'." >&2
+  echo "       Either pass it explicitly as the second argument, or annotate the Jira Secret with all three:" >&2
+  echo "         insight.cyberfabric.com/connector=jira" >&2
+  echo "         insight.cyberfabric.com/tenant=$TENANT" >&2
+  echo "         insight.cyberfabric.com/source-id=<id>" >&2
   exit 1
 }
 
-echo "Running Jira tt-enrich (staging-jira → enrich → silver):"
-echo "  namespace:         $NAMESPACE"
+TENANT_DASHED="${TENANT//_/-}"
+
+echo "Running Jira tt-enrich (staging-jira -> enrich -> silver):"
+echo "  namespace:         $INSIGHT_NAMESPACE"
 echo "  tenant:            $TENANT"
 echo "  insight_source_id: $SOURCE_ID"
 
-# Inline DAG that chains three pre-registered WorkflowTemplate steps.
-# We don't pass image tags or clickhouse coordinates — chart defaults fire.
-kubectl create -n "$NAMESPACE" -f - <<EOF
-apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-metadata:
-  generateName: jira-${TENANT//_/-}-tt-enrich-
-  namespace: $NAMESPACE
-  labels:
-    tenant: "$TENANT"
-    connector: "jira"
-    workflow-kind: "tt-enrich"
-    # Controller picks up workflows by this label — value MUST match
-    # `instanceID` in the argo-workflows-workflow-controller ConfigMap.
-    workflows.argoproj.io/controller-instanceid: argo-workflows-insight
-spec:
-  serviceAccountName: argo-workflow
-  entrypoint: run
-  templates:
-    - name: run
-      dag:
-        tasks:
-          - name: staging-jira
-            templateRef:
-              name: dbt-run
-              template: run
-            arguments:
-              parameters:
-                - name: dbt_select
-                  value: "tag:jira"
-
-          - name: enrich
-            depends: staging-jira
-            templateRef:
-              name: tt-enrich-jira-run
-              template: run
-            arguments:
-              parameters:
-                - name: insight_source_id
-                  value: "$SOURCE_ID"
-
-          - name: silver
-            depends: enrich
-            templateRef:
-              name: dbt-run
-              template: run
-            arguments:
-              parameters:
-                - name: dbt_select
-                  value: "tag:silver,tag:jira+"
-EOF
+NAMESPACE="$INSIGHT_NAMESPACE" \
+  TENANT="$TENANT" \
+  TENANT_DASHED="$TENANT_DASHED" \
+  SOURCE_ID="$SOURCE_ID" \
+  envsubst < workflows/onetime/tt-enrich-jira.yaml.tpl |
+  kubectl create -n "$INSIGHT_NAMESPACE" -f -
 
 echo
 echo "Monitor:"
-echo "  kubectl -n $NAMESPACE get workflows -l connector=jira,workflow-kind=tt-enrich --watch"
+echo "  kubectl -n $INSIGHT_NAMESPACE get workflows -l connector=jira,workflow-kind=tt-enrich --watch"
