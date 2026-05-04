@@ -24,7 +24,7 @@
     unique_key='unique_key',
     engine='ReplacingMergeTree(_version)',
     order_by=['unique_key'],
-    on_schema_change='sync_all_columns',
+    on_schema_change='append_new_columns',
     settings={'allow_nullable_key': 1},
     schema='staging',
     tags=['claude-enterprise', 'silver:class_ai_assistant_usage']
@@ -60,7 +60,15 @@ WITH base AS (
         cowork_metrics_json,
         CAST(parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3) AS Nullable(DateTime64(3))) AS collected_at,
         toUnixTimestamp64Milli(_airbyte_extracted_at) AS _version
-    FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
+    FROM (
+        -- Bronze deduplication: see claude_enterprise__ai_dev_usage.sql for rationale.
+        -- Once promote_bronze_to_rmt is enabled (ADR-0002), this LIMIT 1 BY becomes
+        -- a no-op but stays as defensive depth.
+        SELECT *
+        FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
+        ORDER BY _airbyte_extracted_at DESC
+        LIMIT 1 BY tenant_id, source_id, user_id, date
+    )
     WHERE user_email IS NOT NULL
       AND trim(user_email) != ''
     {% if is_incremental() %}

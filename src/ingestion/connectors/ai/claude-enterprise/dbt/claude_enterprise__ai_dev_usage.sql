@@ -37,7 +37,7 @@
     unique_key='unique_key',
     engine='ReplacingMergeTree(_version)',
     order_by=['unique_key'],
-    on_schema_change='sync_all_columns',
+    on_schema_change='append_new_columns',
     settings={'allow_nullable_key': 1},
     schema='staging',
     tags=['claude-enterprise', 'silver:class_ai_dev_usage']
@@ -85,7 +85,18 @@ SELECT
     'insight_claude_enterprise'                                        AS data_source,
     parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3)     AS collected_at,
     toUnixTimestamp64Milli(_airbyte_extracted_at)                      AS _version
-FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
+FROM (
+    -- Bronze deduplication: bronze_claude_enterprise.claude_enterprise_users
+    -- is plain MergeTree (Airbyte default). Re-emitted days under the 3-day
+    -- incremental lookback accumulate multiple Bronze rows per (user_id, date)
+    -- with different _airbyte_extracted_at. Keep only the latest. Once
+    -- promote_bronze_to_rmt is enabled for this connector (ADR-0002), this
+    -- LIMIT 1 BY becomes a no-op but stays as defensive depth.
+    SELECT *
+    FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
+    ORDER BY _airbyte_extracted_at DESC
+    LIMIT 1 BY tenant_id, source_id, user_id, date
+)
 WHERE user_email IS NOT NULL
   AND trim(user_email) != ''
   AND date IS NOT NULL

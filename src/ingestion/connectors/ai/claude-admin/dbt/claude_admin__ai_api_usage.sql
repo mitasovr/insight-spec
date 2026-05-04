@@ -26,7 +26,7 @@
     unique_key='unique_key',
     engine='ReplacingMergeTree(_version)',
     order_by=['unique_key'],
-    on_schema_change='sync_all_columns',
+    on_schema_change='append_new_columns',
     settings={'allow_nullable_key': 1},
     schema='staging',
     tags=['claude-admin', 'silver:class_ai_api_usage']
