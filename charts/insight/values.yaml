@@ -39,8 +39,10 @@
 ##    reachable only through it. This matches the Constructor Platform
 ##    integration contract.
 ##    Identity Resolution (identityResolution) is OPTIONAL (deploy-flag,
-##    off by default) — it is a C# stub that requires populated bronze
-##    data and is NOT an OIDC provider.
+##    off by default) — it is the Rust persons-store service that owns
+##    the `identity` MariaDB database (per ADR-0006), reads observation
+##    history from ClickHouse `identity.identity_inputs`, and is NOT an
+##    OIDC provider.
 ##
 ## 5. Resolved infra coordinates (URLs, hosts) live in a single ConfigMap
 ##    named `{release}-platform` (see templates/platform-config.yaml).
@@ -341,11 +343,13 @@ analyticsApi:
   # (see templates/secrets.yaml). The subchart consumes it via envFrom.
   existingSecret: "insight-analytics-api-config"
 
-# ─── Identity Resolution (C# stub, OFF by default) ──────────────────────
-# NOT the OIDC identity provider. This is a person-record normalizer that
-# queries bronze_bamboohr.employees (populated by an Airbyte BambooHR
-# sync). Without ingestion data it crashloops on startup. Off by default
-# — enable only after at least one BambooHR sync has run.
+# ─── Identity Resolution (Rust persons-store, OFF by default) ───────────
+# NOT the OIDC identity provider. The Rust service owns its own MariaDB
+# database (per ADR-0006), reads observation history from ClickHouse
+# `identity.identity_inputs` (filled by Airbyte connector pipelines), and
+# at startup applies its embedded sea-orm migrations to build/maintain
+# `persons` and `account_person_map`. Off by default — enable only after
+# at least one connector sync has populated `identity.identity_inputs`.
 identityResolution:
   deploy: false
   replicaCount: 1
@@ -356,6 +360,12 @@ identityResolution:
   resources:
     requests: { cpu: 50m,  memory: 64Mi }
     limits:   { cpu: 250m, memory: 256Mi }
+  # MariaDB database the service owns. Per ADR-0006 each backend service
+  # with MariaDB tables runs its own sea-orm Migrator inside its own
+  # database, so its `seaql_migrations` tracker never collides with other
+  # services'. The umbrella provisions this database via a Helm
+  # pre-install/pre-upgrade Job (see templates/identity-db-init-job.yaml).
+  databaseName: "identity"
   # When deploy=true the umbrella also generates
   # `insight-identity-resolution-config` with IDENTITY__* env vars.
   existingSecret: "insight-identity-resolution-config"

@@ -129,8 +129,8 @@ Insight connects to 10+ external platforms, each contributing partial person dat
 
 ### 3.1 Module-Specific Environment Constraints
 
-- **Storage**: All person domain tables reside in ClickHouse. No separate RDBMS.
-- **Shared input**: Person-attribute observations originate from the `identity_inputs` table owned by the Identity Resolution domain.
+- **Storage**: The Person-domain analytical tables (golden-record projection, `person_availability`, `person_conflicts`) reside in ClickHouse. The MariaDB-backed `persons` identity-attribute history table read by this domain is owned and maintained by the Identity-Resolution domain (see identity-resolution DESIGN §3.7 and ingestion [ADR-0006](../../ingestion/specs/ADR/0006-service-owned-migrations.md)).
+- **Shared input**: Person-attribute observations originate from two sources — the `identity_inputs` ClickHouse table (connector-sourced) and the MariaDB `persons` history table (operator edits), both owned by the Identity Resolution domain.
 - **SCD history**: Historical versions of person records are managed by dbt macros (SCD Type 2 / Type 3). This domain defines the current-state table; history schemas are out of scope.
 - **Naming**: All tables and columns follow the shared glossary conventions.
 
@@ -407,15 +407,15 @@ The system **MUST** return a single person record (GET /persons/:id) in < 50 ms 
 
 **Compatibility**: The `id` UUID format and column name are stable. Adding new golden record columns is backward-compatible. Renaming or removing columns is breaking.
 
-#### Bootstrap Inputs Read Contract
+#### Identity Inputs Read Contract
 
-- [ ] `p1` - **ID**: `cpt-person-contract-bootstrap-inputs-read`
+- [ ] `p1` - **ID**: `cpt-person-contract-identity-inputs-read`
 
 **Direction**: required from external (reads from IR domain's `identity_inputs` table)
 
 **Protocol/Format**: ClickHouse SELECT
 
-**Description**: The Person domain reads person-attribute observations from `identity_inputs` by filtering on `alias_type` values that correspond to person attributes (`display_name`, `role`, `location`, `email`, `username`). The table schema is owned by the IR domain.
+**Description**: The Person domain reads person-attribute observations from `identity_inputs` by filtering on `value_type` values that correspond to person attributes (`display_name`, `role`, `location`, `email`, `username`). The table schema is owned by the IR domain.
 
 **Compatibility**: The Person domain depends on `identity_inputs` schema stability. Column additions are backward-compatible; column removals or renames require coordination with IR domain.
 
@@ -434,7 +434,7 @@ The system **MUST** return a single person record (GET /persons/:id) in < 50 ms 
 - HR connector has synced and written person-attribute observations to `identity_inputs`
 
 **Main Flow**:
-1. GoldenRecordBuilder reads new person-attribute observations from `identity_inputs` (filtered by person-attribute `alias_type` values)
+1. GoldenRecordBuilder reads new person-attribute observations from `identity_inputs` (filtered by person-attribute `value_type` values)
 2. For each person with changes: compare incoming attributes against current `persons` row
 3. Apply source priority per attribute; select highest-priority non-empty value
 4. Write golden record fields to `persons` with corresponding `*_source` values

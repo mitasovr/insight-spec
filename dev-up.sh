@@ -133,6 +133,12 @@ if [[ "$CLUSTER_MODE" == "local" ]]; then
   fi
   kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${KUBECONFIG_PATH}" 2>/dev/null || true
   export KUBECONFIG="${KUBECONFIG_PATH}"
+
+  # WSL/Kind DNS workaround: replace CoreDNS upstream `/etc/resolv.conf` with
+  # public DNS so connector pods can reach external APIs (api.anthropic.com,
+  # api.zoom.us, login.microsoftonline.com, …). Idempotent; opt out with
+  # SKIP_COREDNS_PATCH=1; override upstreams via DNS_UPSTREAMS.
+  "$ROOT_DIR/scripts/dev/patch-coredns-wsl.sh"
 else
   # remote: KUBECONFIG must already be set via env file or shell
   : "${KUBECONFIG:?ERROR: KUBECONFIG must be set for CLUSTER_MODE=remote (set it in $ENV_FILE)}"

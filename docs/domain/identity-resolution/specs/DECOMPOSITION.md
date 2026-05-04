@@ -56,7 +56,7 @@ These items have schema defined in DESIGN §3.7 (`cpt-insightspec-ir-dbtable-mer
   - Hot-path alias lookup in `aliases` table
   - ClickHouse Dictionary for analytical Silver step 2 enrichment
   - Tenant isolation on all queries
-  - Cross-domain integration: `aliases.person_id` references `persons.id` (person domain creates person records via dbt seed)
+  - Cross-domain integration: `aliases.person_id` references `persons.person_id` (person domain creates person records; identity-resolution seeds the initial `persons` from `identity_inputs`, see ADR-0002)
 
 - **Out of scope**:
   - `identity_inputs` table (Feature 2)
@@ -109,6 +109,7 @@ These items have schema defined in DESIGN §3.7 (`cpt-insightspec-ir-dbtable-mer
 
   - [ ] `p3` - `cpt-insightspec-ir-db-schemas`
   - [ ] `p1` - `cpt-insightspec-ir-dbtable-aliases`
+  - [x] `p1` - `cpt-insightspec-ir-dbtable-persons-mariadb`
 
 - **Interfaces**:
 
@@ -189,7 +190,7 @@ These items have schema defined in DESIGN §3.7 (`cpt-insightspec-ir-dbtable-mer
 
 - **Data**:
 
-  - [x] `p1` - `cpt-insightspec-ir-dbtable-bootstrap-inputs`
+  - [x] `p1` - `cpt-insightspec-ir-dbtable-identity-inputs`
   - [ ] `p2` - `cpt-insightspec-ir-dbtable-unmapped`
   - [ ] `p2` - `cpt-insightspec-ir-dbtable-conflicts`
 
@@ -308,7 +309,8 @@ cpt-ir-feature-matching-engine
 | `cpt-insightspec-ir-component-conflict-detector` | Feature 2 (bootstrap-pipeline) |
 | `cpt-insightspec-ir-component-matching-engine` | Feature 3 (matching-engine) |
 | `cpt-insightspec-ir-dbtable-aliases` | Feature 1 (initial-seed) |
-| `cpt-insightspec-ir-dbtable-bootstrap-inputs` | Feature 2 (bootstrap-pipeline) |
+| `cpt-insightspec-ir-dbtable-identity-inputs` | Feature 2 (bootstrap-pipeline) |
+| `cpt-insightspec-ir-dbtable-persons-mariadb` | Feature 1 (initial-seed) |
 | `cpt-insightspec-ir-dbtable-unmapped` | Feature 2 (bootstrap-pipeline) |
 | `cpt-insightspec-ir-dbtable-conflicts` | Feature 2 (bootstrap-pipeline) |
 | `cpt-insightspec-ir-dbtable-match-rules` | Feature 3 (matching-engine) |
