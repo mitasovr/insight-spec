@@ -1,0 +1,51 @@
+{{ config(
+    materialized='incremental',
+    incremental_strategy='append',
+    schema='staging',
+    engine='ReplacingMergeTree(_version)',
+    order_by='(unique_key)',
+    settings={'allow_nullable_key': 1},
+    tags=['hubspot', 'silver:class_crm_accounts']
+) }}
+
+WITH src AS (
+    SELECT
+        tenant_id,
+        source_id,
+        unique_key,
+        id                                              AS account_id,
+        properties_name                                 AS name,
+        properties_domain                               AS domain,
+        properties_industry                             AS industry,
+        properties_hubspot_owner_id                     AS owner_id,
+        -- HubSpot has no native parent-account hierarchy in v3;
+        -- parent_account_id stays NULL so Silver schema fit matches Salesforce.
+        CAST(NULL AS Nullable(String))                  AS parent_account_id,
+        toJSONString(map(
+            'city',              coalesce(toString(properties_city), ''),
+            'state',             coalesce(toString(properties_state), ''),
+            'country',           coalesce(toString(properties_country), ''),
+            'numberofemployees', coalesce(toString(properties_numberofemployees), ''),
+            'annualrevenue',     coalesce(toString(properties_annualrevenue), ''),
+            'archived',          toString(coalesce(archived, false))
+        ))                                              AS metadata,
+        custom_fields,
+        createdAt                                       AS created_at,
+        updatedAt                                       AS updated_at,
+        data_source,
+        coalesce(toUnixTimestamp64Milli(updatedAt), 0)  AS _version
+    FROM {{ source('bronze_hubspot', 'companies') }}
+)
+{% if is_incremental() %}
+SELECT src.*
+FROM src
+LEFT JOIN (
+    SELECT tenant_id, source_id, max(_version) AS hwm
+    FROM {{ this }}
+    GROUP BY tenant_id, source_id
+) w
+  ON w.tenant_id = src.tenant_id AND w.source_id = src.source_id
+WHERE src._version > coalesce(w.hwm, 0)
+{% else %}
+SELECT * FROM src
+{% endif %}
