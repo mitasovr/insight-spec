@@ -33,10 +33,12 @@
 
 {{ config(
     materialized='incremental',
-    incremental_strategy='delete+insert',
+    incremental_strategy='append',
     unique_key='unique_key',
+    engine='ReplacingMergeTree(_version)',
     order_by=['unique_key'],
     on_schema_change='sync_all_columns',
+    settings={'allow_nullable_key': 1},
     schema='staging',
     tags=['claude-enterprise', 'silver:class_ai_dev_usage']
 ) }}
@@ -81,16 +83,9 @@ SELECT
     claude_code_metrics_json                                           AS tool_action_breakdown_json,
     'claude_enterprise'                                                AS source,
     'insight_claude_enterprise'                                        AS data_source,
-    parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3)     AS collected_at
-FROM (
-    -- Bronze deduplication: bronze_claude_enterprise.claude_enterprise_users can
-    -- contain multiple Airbyte rows for the same logical (user_id, date) when
-    -- syncs re-emit the day. Keep only the latest by _airbyte_extracted_at.
-    SELECT *
-    FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
-    ORDER BY _airbyte_extracted_at DESC
-    LIMIT 1 BY tenant_id, source_id, user_id, date
-)
+    parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3)     AS collected_at,
+    toUnixTimestamp64Milli(_airbyte_extracted_at)                      AS _version
+FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
 WHERE user_email IS NOT NULL
   AND trim(user_email) != ''
   AND date IS NOT NULL

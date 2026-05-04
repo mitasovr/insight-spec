@@ -20,8 +20,9 @@
 
 {{ config(
     materialized='incremental',
-    incremental_strategy='delete+insert',
+    incremental_strategy='append',
     unique_key='unique_key',
+    engine='ReplacingMergeTree(_version)',
     order_by=['unique_key'],
     on_schema_change='sync_all_columns',
     settings={'allow_nullable_key': 1},
@@ -57,14 +58,9 @@ WITH base AS (
         cowork_dispatch_turn_count,
         cowork_skills_used_count,
         cowork_metrics_json,
-        CAST(parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3) AS Nullable(DateTime64(3))) AS collected_at
-    FROM (
-        -- Bronze deduplication: see claude_enterprise__ai_dev_usage.sql for rationale.
-        SELECT *
-        FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
-        ORDER BY _airbyte_extracted_at DESC
-        LIMIT 1 BY tenant_id, source_id, user_id, date
-    )
+        CAST(parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3) AS Nullable(DateTime64(3))) AS collected_at,
+        toUnixTimestamp64Milli(_airbyte_extracted_at) AS _version
+    FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
     WHERE user_email IS NOT NULL
       AND trim(user_email) != ''
     {% if is_incremental() %}
@@ -106,7 +102,8 @@ chat AS (
         chat_metrics_json                                               AS surface_metrics_json,
         'claude_enterprise'                                             AS source,
         'insight_claude_enterprise'                                     AS data_source,
-        collected_at
+        collected_at,
+        _version
     FROM base
     -- Emit a chat row whenever ANY chat-surface counter is non-zero. Anthropic
     -- can report file uploads / skills / thinking turns on days with no logged
@@ -150,7 +147,8 @@ excel AS (
         office_metrics_json                                             AS surface_metrics_json,
         'claude_enterprise'                                             AS source,
         'insight_claude_enterprise'                                     AS data_source,
-        collected_at
+        collected_at,
+        _version
     FROM base
     WHERE coalesce(excel_session_count, 0) > 0
        OR coalesce(excel_message_count, 0) > 0
@@ -184,7 +182,8 @@ powerpoint AS (
         office_metrics_json                                             AS surface_metrics_json,
         'claude_enterprise'                                             AS source,
         'insight_claude_enterprise'                                     AS data_source,
-        collected_at
+        collected_at,
+        _version
     FROM base
     WHERE coalesce(powerpoint_session_count, 0) > 0
        OR coalesce(powerpoint_message_count, 0) > 0
@@ -218,7 +217,8 @@ cowork AS (
         cowork_metrics_json                                             AS surface_metrics_json,
         'claude_enterprise'                                             AS source,
         'insight_claude_enterprise'                                     AS data_source,
-        collected_at
+        collected_at,
+        _version
     FROM base
     -- Same broad filter as chat: emit row whenever any cowork counter signals
     -- activity. Action-only / dispatch-only days are observed in real data.
@@ -260,7 +260,8 @@ cross_surface AS (
         CAST(NULL AS Nullable(String))                                  AS surface_metrics_json,
         'claude_enterprise'                                             AS source,
         'insight_claude_enterprise'                                     AS data_source,
-        collected_at
+        collected_at,
+        _version
     FROM base
     WHERE coalesce(web_search_count, 0) > 0
 )

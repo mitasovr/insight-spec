@@ -22,10 +22,12 @@
 -- (Admin is currently the sole contributor to this Silver class).
 {{ config(
     materialized='incremental',
-    incremental_strategy='delete+insert',
+    incremental_strategy='append',
     unique_key='unique_key',
+    engine='ReplacingMergeTree(_version)',
     order_by=['unique_key'],
     on_schema_change='sync_all_columns',
+    settings={'allow_nullable_key': 1},
     schema='staging',
     tags=['claude-admin', 'silver:class_ai_api_usage']
 ) }}
@@ -53,7 +55,8 @@ SELECT
     CAST(NULL AS Nullable(String))                  AS cost_currency,
     CAST('claude_admin' AS String)                  AS source,
     CAST('insight_claude_admin' AS String)          AS data_source,
-    CAST(NULL AS Nullable(DateTime64(3)))           AS collected_at
+    CAST(NULL AS Nullable(DateTime64(3)))           AS collected_at,
+    CAST(0 AS UInt64)                               AS _version
 WHERE 1 = 0
 {%- else %}
 
@@ -93,7 +96,8 @@ SELECT
     CAST(NULL AS Nullable(String))                  AS cost_currency,
     'claude_admin'                                  AS source,
     'insight_claude_admin'                          AS data_source,
-    CAST(parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3) AS Nullable(DateTime64(3))) AS collected_at
+    CAST(parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3) AS Nullable(DateTime64(3))) AS collected_at,
+    toUnixTimestamp64Milli(_airbyte_extracted_at)   AS _version
 FROM {{ source('bronze_claude_admin', 'claude_admin_messages_usage') }}
 {% if is_incremental() %}
 WHERE toDate(date) > (
