@@ -111,6 +111,7 @@
         ENGINE = {{ engine_decl }}
         {{ partition_clause }}
         ORDER BY {{ order_by }}
+        SETTINGS allow_nullable_key = 1
         AS SELECT * FROM `{{ db }}`.`{{ tbl }}`
     {% endset %}
     {% do run_query(ctas) %}
