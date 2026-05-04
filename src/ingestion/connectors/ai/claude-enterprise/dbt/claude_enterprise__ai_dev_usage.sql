@@ -25,16 +25,20 @@
 --     grain. No SUM/argMax wrapping needed.
 --   • Filter: code_session_count > 0 OR code_lines_added > 0
 --                                       OR code_tool_accepted_count > 0
---     drop rows where the user had Enterprise activity but no Code activity
---     that day (avoids polluting class_ai_dev_usage with empty Code rows).
---     The third condition catches tool-only days where the user accepted
---     Edit/Write/MultiEdit/NotebookEdit tool calls without a session/lines
---     event being attributed.
+--                                       OR code_commit_count > 0
+--                                       OR code_pull_request_count > 0
+--     Drop rows with no Code activity that day. The commit/PR conditions catch
+--     days where Anthropic registers a git event without a session counter
+--     (edge case observed in real Enterprise data).
 
 {{ config(
     materialized='incremental',
+    incremental_strategy='append',
     unique_key='unique_key',
+    engine='ReplacingMergeTree(_version)',
     order_by=['unique_key'],
+    on_schema_change='append_new_columns',
+    settings={'allow_nullable_key': 1},
     schema='staging',
     tags=['claude-enterprise', 'silver:class_ai_dev_usage']
 ) }}
@@ -71,16 +75,36 @@ SELECT
     CAST(NULL AS Nullable(UInt32))                                     AS chat_requests,
     -- Cost is not surfaced per-user in Enterprise; tied to org subscription, not consumption.
     CAST(NULL AS Nullable(UInt32))                                     AS cost_cents,
+    -- Enterprise exposes commit and PR counts per user per day via core_metrics.
+    toUInt32(coalesce(code_commit_count, 0))                           AS commits_count,
+    toUInt32(coalesce(code_pull_request_count, 0))                     AS pull_requests_count,
+    -- Full tool-action breakdown (edit/write/multi_edit/notebook_edit accepted+rejected).
+    -- Stored as-is from Bronze for downstream analytics without re-aggregation.
+    claude_code_metrics_json                                           AS tool_action_breakdown_json,
     'claude_enterprise'                                                AS source,
     'insight_claude_enterprise'                                        AS data_source,
-    parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3)     AS collected_at
-FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
+    parseDateTime64BestEffortOrNull(coalesce(collected_at, ''), 3)     AS collected_at,
+    toUnixTimestamp64Milli(_airbyte_extracted_at)                      AS _version
+FROM (
+    -- Bronze deduplication: bronze_claude_enterprise.claude_enterprise_users
+    -- is plain MergeTree (Airbyte default). Re-emitted days under the 3-day
+    -- incremental lookback accumulate multiple Bronze rows per (user_id, date)
+    -- with different _airbyte_extracted_at. Keep only the latest. Once
+    -- promote_bronze_to_rmt is enabled for this connector (ADR-0002), this
+    -- LIMIT 1 BY becomes a no-op but stays as defensive depth.
+    SELECT *
+    FROM {{ source('bronze_claude_enterprise', 'claude_enterprise_users') }}
+    ORDER BY _airbyte_extracted_at DESC
+    LIMIT 1 BY tenant_id, source_id, user_id, date
+)
 WHERE user_email IS NOT NULL
   AND trim(user_email) != ''
   AND date IS NOT NULL
   AND (coalesce(code_session_count, 0) > 0
        OR coalesce(code_lines_added, 0) > 0
-       OR coalesce(code_tool_accepted_count, 0) > 0)
+       OR coalesce(code_tool_accepted_count, 0) > 0
+       OR coalesce(code_commit_count, 0) > 0
+       OR coalesce(code_pull_request_count, 0) > 0)
 {% if is_incremental() %}
   AND toDate(parseDateTimeBestEffortOrNull(date)) > (
       SELECT coalesce(max(day), toDate('1970-01-01')) - INTERVAL 3 DAY

@@ -194,10 +194,7 @@ impl PeopleStore {
         }
 
         let mut aliases = HashMap::new();
-        aliases.insert(
-            "test@vz.com".to_owned(),
-            "oleksii.shponarskyi@virtuozzo.com".to_owned(),
-        );
+        aliases.insert("test@vz.com".to_owned(), "some@person-at-vz.com".to_owned());
 
         Self { by_email, aliases }
     }

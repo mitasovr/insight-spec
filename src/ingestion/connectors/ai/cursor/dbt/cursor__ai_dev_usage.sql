@@ -19,8 +19,11 @@
 -- tapped by a separate staging model if ever needed.
 {{ config(
     materialized='incremental',
+    incremental_strategy='append',
     unique_key='unique_key',
+    engine='ReplacingMergeTree(_version)',
     order_by=['unique_key'],
+    on_schema_change='append_new_columns',
     settings={'allow_nullable_key': 1},
     schema='staging',
     tags=['cursor', 'silver:class_ai_dev_usage']
@@ -50,9 +53,14 @@ SELECT
     toUInt32(coalesce(chatRequests, 0) + coalesce(composerRequests, 0))
                                                     AS chat_requests,
     CAST(NULL AS Nullable(UInt32))                  AS cost_cents,
+    -- CE-specific columns — NULL for Cursor (Cursor does not expose git-level attribution)
+    CAST(NULL AS Nullable(UInt32))                  AS commits_count,
+    CAST(NULL AS Nullable(UInt32))                  AS pull_requests_count,
+    CAST(NULL AS Nullable(String))                  AS tool_action_breakdown_json,
     'cursor'                                        AS source,
     'insight_cursor'                                AS data_source,
-    CAST(_airbyte_extracted_at AS Nullable(DateTime64(3))) AS collected_at
+    CAST(_airbyte_extracted_at AS Nullable(DateTime64(3))) AS collected_at,
+    toUnixTimestamp64Milli(_airbyte_extracted_at)          AS _version
 FROM {{ source('bronze_cursor', 'cursor_daily_usage') }}
 WHERE isActive = true
   AND email IS NOT NULL
