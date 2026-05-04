@@ -13,7 +13,7 @@
 -- Raw SQL equivalents of dbt models:
 --   seed_persons_from_cursor.sql
 --   seed_aliases_from_cursor.sql
---   seed_identity_input_from_cursor.sql
+--   seed_identity_inputs_from_cursor.sql
 -- ============================================================
 
 

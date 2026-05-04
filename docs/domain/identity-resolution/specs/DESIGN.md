@@ -473,7 +473,7 @@ Detects alias-level conflicts — when the same alias value appears linked to di
 | Identity-resolution `persons` (MariaDB) | Logical FK (`aliases.person_id → persons.person_id`) | Alias-to-person mapping target. Owned and written by this domain via the seed (ADR-0002) and future operator flows; the person domain reads from it to build its golden record |
 | Identity-resolution seed | One-shot Python script | Initial population of `persons` from `identity_inputs`; runs at bootstrap (and again on operator demand for new connectors). See ADR-0002 |
 | Connector sync events | Argo Workflow trigger | BootstrapJob runs after connector sync completes |
-| dbt models (Bronze → Silver) | ClickHouse tables | Connectors populate `identity_inputs` via `identity_input_from_history` macro applied to `fields_history` models |
+| dbt models (Bronze → Silver) | ClickHouse tables | Connectors populate `identity_inputs` via `identity_inputs_from_history` macro applied to `fields_history` models |
 
 **Dependency Rules**:
 - No circular dependencies between identity-resolution and person domains
@@ -620,7 +620,7 @@ Analytical tables (`identity_inputs`, `aliases`, `match_rules`, `unmapped`, `con
 
 Alias observations from connectors. Each row represents one changed alias value from one source.
 
-**Population mechanism**: Connectors populate this table via dbt models using the shared `identity_input_from_history` macro. Each connector declares:
+**Population mechanism**: Connectors populate this table via dbt models using the shared `identity_inputs_from_history` macro. Each connector declares:
 - `identity_fields` — mapping of source field names to alias types (e.g., `workEmail → email`, `employeeNumber → employee_id`)
 - `deactivation_condition` — SQL expression that detects entity deactivation (e.g., `field_name = 'status' AND new_value = 'Inactive'`), which emits DELETE rows for all identity fields
 
@@ -628,7 +628,7 @@ The macro reads from the connector's `fields_history` model (field-level change 
 - **UPSERT** rows when an identity-relevant field changes
 - **DELETE** rows (with empty `value`) when the deactivation condition is met
 
-Per-connector staging tables (e.g., `staging.bamboohr__identity_input`) are unified into a single `identity.identity_inputs` view via `union_by_tag('identity:input')`.
+Per-connector staging tables (e.g., `staging.bamboohr__identity_inputs`) are unified into a single `identity.identity_inputs` view via `union_by_tag('silver:identity_inputs')`.
 
 The models are incremental (`append` strategy): each run processes only `fields_history` rows with `updated_at` newer than the last `_synced_at` in the target table.
 
@@ -904,9 +904,9 @@ See [ADR-0002](ADR/0002-stable-person-id-via-persons-observations.md) for the fu
 **Prerequisites and ordering** (end-to-end bootstrap):
 
 1. Connector secrets applied (`./secrets/apply.sh`).
-2. `./up.sh` — provisions MariaDB + the `identity` database + grants, builds and deploys the identity-resolution service; the service's initContainer applies pending migrations (including the `persons` table).
-3. `./init.sh` — runs ClickHouse migrations, registers connectors, creates connections.
-4. Airbyte sync produced Bronze data (`./sync-all.sh` + wait).
+2. `./dev-up.sh` (or the canonical `deploy/scripts/install.sh`) — installs Airbyte + Argo Workflows + the Insight umbrella chart. The umbrella's `identity-db-init-job` Helm pre-install Job provisions the `identity` MariaDB database and grants. The identity-resolution pod then starts and applies its sea-orm migrations (including the `persons` table) at startup via `run_migrations(&db)` in `main.rs`.
+3. `./src/ingestion/run-init.sh` — runs ClickHouse migrations, registers connectors, creates Airbyte connections, syncs Argo flows.
+4. Airbyte sync produces Bronze data (`./sync-all.sh` + wait).
 5. dbt models run to populate `identity.identity_inputs` (`dbt run --select +identity_inputs`).
 6. Seed run (`./src/backend/services/identity/seed/seed-persons.sh`) — invokes the Python seed.
 
@@ -1275,7 +1275,7 @@ The Dictionary approach trades a 30-60s cache lag for faster lookup in high-thro
 
 **Sources**: BambooHR (employee_id: E123, email: anna.ivanova@acme.com), Active Directory (username: aivanova, email after name change: anna.smirnova@acme.com), GitHub (username: annai), GitLab (username: ivanova.anna), Jira (username: aivanova).
 
-**Step 1 — dbt `identity_input_from_history` generates rows from `fields_history`**:
+**Step 1 — dbt `identity_inputs_from_history` generates rows from `fields_history`**:
 
 | `insight_source_type` | `source_account_id` | `value_type` | `value` | `value_field_name` |
 |---|---|---|---|---|
@@ -1425,7 +1425,7 @@ Phase 1 seed and connector models derive `insight_tenant_id` (UUID) and `insight
 **Formula**: `toUUID(UUIDNumToString(sipHash128(coalesce(<col>, ''))))`
 - `sipHash128(...)` — deterministic 128-bit hash (returns `FixedString(16)`)
 - `UUIDNumToString(...)` — formats the 16 bytes as a UUID-shaped string
-- `toUUID(...)` — parses the string into ClickHouse `UUID` type — **required**: without this outer cast the value is `String` and breaks `UNION ALL` in `identity.identity_inputs` view (error `NO_COMMON_TYPE: UUID, UUID, String, String`). Both the `identity_input_from_history` macro (connector models) and all seed models must emit UUID.
+- `toUUID(...)` — parses the string into ClickHouse `UUID` type — **required**: without this outer cast the value is `String` and breaks `UNION ALL` in `identity.identity_inputs` view (error `NO_COMMON_TYPE: UUID, UUID, String, String`). Both the `identity_inputs_from_history` macro (connector models) and all seed models must emit UUID.
 
 **Why temporary**: The PR #55 convention requires `insight_tenant_id` / `insight_source_id` to be real UUIDv7 foreign keys referencing future `tenants` / `sources` tables. Until those exist, the deterministic hash ensures:
 - The same Bronze identifier always produces the same UUID across all models.
@@ -1435,29 +1435,29 @@ Phase 1 seed and connector models derive `insight_tenant_id` (UUID) and `insight
 **Migration path**: When `tenants` / `sources` tables are created, replace all `toUUID(UUIDNumToString(sipHash128(...)))` calls with a lookup join (e.g., `JOIN tenants t ON t.external_id = cm.tenant_id`). All affected files are marked with `-- TEMPORARY: sipHash128` comments. Search: `grep -r "TEMPORARY.*sipHash128" src/ingestion/`.
 
 **Affected files** (Phase 1):
-- `dbt/macros/identity_input_from_history.sql` — computes both for bamboohr/zoom connector models
+- `dbt/macros/identity_inputs_from_history.sql` — computes both for bamboohr/zoom connector models
 - `dbt/identity/seed_persons_from_cursor.sql`, `seed_persons_from_claude_admin.sql` — compute the hash
 - `dbt/identity/seed_aliases_from_cursor.sql`, `seed_aliases_from_claude_admin.sql` — use it in tenant-scoped JOINs
-- `dbt/identity/seed_identity_input_from_cursor.sql`, `seed_identity_input_from_claude_admin.sql` — compute the hash
+- `dbt/identity/seed_identity_inputs_from_cursor.sql`, `seed_identity_inputs_from_claude_admin.sql` — compute the hash
 - `scripts/adhoc/seed_from_cursor_manual.sql`, `scripts/adhoc/seed_from_claude_admin_manual.sql` — ad-hoc Play UI testing SQL (point-in-time snapshots, not kept in sync with dbt models)
 
 ### REC-IR-05: Explicit canonical id emission per connector (Phase 2)
 
 **Status**: deferred to follow-up PR.
 
-**Context**: the `identity_input_from_history` dbt macro currently emits the canonical `value_type='id'` binding observation via two implicit CTEs (`id_upserts`, `id_deletes`) in addition to the per-field `upserts`/`deletes` blocks driven by the connector's `identity_fields` list. Connectors that go through the macro (BambooHR, Zoom, future) get this row automatically; connectors that bypass the macro (`seed_identity_input_from_cursor`, `seed_identity_input_from_claude_admin`, plus the `scripts/adhoc/seed_from_*_manual.sql` companions) emit it explicitly as a UNION-ALL branch. The contract that "every connector emits a `value_type='id'` observation" is therefore convention-driven, not declarative at the call site.
+**Context**: the `identity_inputs_from_history` dbt macro currently emits the canonical `value_type='id'` binding observation via two implicit CTEs (`id_upserts`, `id_deletes`) in addition to the per-field `upserts`/`deletes` blocks driven by the connector's `identity_fields` list. Connectors that go through the macro (BambooHR, Zoom, future) get this row automatically; connectors that bypass the macro (`seed_identity_inputs_from_cursor`, `seed_identity_inputs_from_claude_admin`, plus the `scripts/adhoc/seed_from_*_manual.sql` companions) emit it explicitly as a UNION-ALL branch. The contract that "every connector emits a `value_type='id'` observation" is therefore convention-driven, not declarative at the call site.
 
-**Why follow up**: a connector author looking at `zoom__identity_input.sql` sees `identity_fields=[email, employee_id, display_name]` and no mention of the account identifier itself. The relationship is invisible without reading the macro. The macro also hardcodes `value_field_name = '{source_type}.entity_id'` for the implicit row instead of the canonical `bronze_<src>.<table>.id` path that explicit entries produce elsewhere.
+**Why follow up**: a connector author looking at `zoom__identity_inputss.sql` sees `identity_fields=[email, employee_id, display_name]` and no mention of the account identifier itself. The relationship is invisible without reading the macro. The macro also hardcodes `value_field_name = '{source_type}.entity_id'` for the implicit row instead of the canonical `bronze_<src>.<table>.id` path that explicit entries produce elsewhere.
 
 **Recommended Phase-2 cleanup**:
 
 1. Add `{'field': 'id', 'value_type': 'id', 'value_field_name': 'bronze_<src>.<table>.id'}` explicitly to every connector's `identity_fields` list — Bamboo, Zoom, and any future macro-using connector.
-2. Remove `id_upserts` / `id_deletes` from `identity_input_from_history`. The per-field `upserts` / `deletes` blocks already handle every declared field uniformly, so the macro becomes simpler and the connector's contract becomes fully explicit.
+2. Remove `id_upserts` / `id_deletes` from `identity_inputs_from_history`. The per-field `upserts` / `deletes` blocks already handle every declared field uniformly, so the macro becomes simpler and the connector's contract becomes fully explicit.
 3. Validate in CI (or in the macro itself) that every connector's `identity_fields` contains exactly one entry with `value_type='id'` — turns the convention into an enforceable contract.
 
 **Why not now**: orthogonal to the schema split, SCD2 cache, and email-conflict policy work in this PR. Bundling would balloon the diff and mix code-style concerns with semantic ones. No bug today — the canonical row IS emitted correctly for every existing connector (verified file-by-file).
 
-**Source**: mitasovr review on commit `bec6c98`, Zoom-thread clarification on `zoom__identity_input.sql:15`.
+**Source**: mitasovr review on commit `bec6c98`, Zoom-thread clarification on `zoom__identity_inputss.sql:15`.
 
 ## 6. Traceability
 

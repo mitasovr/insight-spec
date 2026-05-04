@@ -182,7 +182,7 @@ These items have schema defined in DESIGN §3.7 (`cpt-insightspec-ir-dbtable-mer
 
 - **API**:
   - (No new API endpoints — BootstrapJob is a batch job, not an API service)
-  - Connector write contract: dbt `identity_input_from_history` macro applied to `fields_history` models (implemented for BambooHR and Zoom)
+  - Connector write contract: dbt `identity_inputs_from_history` macro applied to `fields_history` models (implemented for BambooHR and Zoom)
 
 - **Sequences**:
 

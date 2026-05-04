@@ -44,8 +44,8 @@ ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY (insight_tenant_id, id);
 
 -- ============================================================
--- identity.identity_inputs — created by dbt (identity/identity_inputs.sql view
--- + connector models like bamboohr__identity_input, zoom__identity_input).
+-- identity.identity_inputs — created by dbt (silver/_shared/identity_inputs.sql
+-- + connector models like bamboohr__identity_inputs, zoom__identity_inputs).
 -- NOT created here. See: docs/domain/identity-resolution/specs/DESIGN.md §3.7
 -- ============================================================
 

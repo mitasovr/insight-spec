@@ -77,7 +77,7 @@ models:
         tests:
           - not_null
 
-  - name: seed_identity_input_from_cursor
+  - name: seed_identity_inputs_from_cursor
     description: >
       Phase 1 seed: Cursor members → identity.identity_inputs table.
       Raw alias observations (no normalization). Each cursor member produces
@@ -189,7 +189,7 @@ models:
         tests:
           - not_null
 
-  - name: seed_identity_input_from_claude_admin
+  - name: seed_identity_inputs_from_claude_admin
     description: >
       Phase 1 seed: Claude Admin users → identity.identity_inputs table.
       Raw alias observations (no normalization). Each user produces

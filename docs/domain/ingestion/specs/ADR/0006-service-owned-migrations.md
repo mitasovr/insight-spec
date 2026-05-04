@@ -54,9 +54,12 @@ MariaDB tables, or to introduce a separate mechanism alongside it.
    They are not schema migrations and must not enter the migration
    history.
 
-6. **Is responsible for its schema lifecycle**. `up.sh` and `init.sh`
-   provision the **database + user grants** (infra concern) but
-   never apply per-service DDL.
+6. **Is responsible for its schema lifecycle**. The umbrella Helm
+   chart provisions the **database + user grants** (infra concern)
+   via dedicated pre-install / pre-upgrade Jobs (e.g.
+   `charts/insight/templates/identity-db-init-job.yaml`); the service
+   itself never applies these grants and never runs cross-service
+   DDL.
 
 ## Applied to `persons`
 
@@ -65,15 +68,22 @@ MariaDB tables, or to introduce a separate mechanism alongside it.
   `src/backend/services/identity/src/migration/m20260421_000001_persons.rs`.
 - Migrator registered in
   `src/backend/services/identity/src/migration/mod.rs`.
-- Applied on startup via `run_migrations(&db)` in `src/main.rs` +
-  through the `migrate` subcommand invoked by the helm initContainer.
+- Applied on every pod startup via `run_migrations(&db)` in
+  `src/main.rs` (idempotent — sea-orm tracks applied migrations in
+  `seaql_migrations` inside the service's own database). The
+  `migrate` CLI subcommand applies the same migrations and exits;
+  it is intended for use as a Helm `initContainer` if/when an
+  install needs deterministic ordering separate from pod-startup.
 - One-shot seed scripts (bash + Python) live at
   `src/backend/services/identity/seed/`.
 
 ## Consequences
 
-- `up.sh` creates the `identity` database + grants, then hands off to
-  the service. No global migration step remains in `up.sh` / `init.sh`.
+- The umbrella Helm Job (`charts/insight/templates/identity-db-init-job.yaml`)
+  creates the `identity` database + user grants once before the
+  identity-resolution pod starts; the service then applies its own
+  schema. There is no global migration step in any other chart or
+  script.
 - Adding a new service-owned MariaDB table means adding a new
   migration file in that service's `migration/` directory — no
   ingestion-side changes required.

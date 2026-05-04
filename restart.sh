@@ -1,44 +1,48 @@
 #!/usr/bin/env bash
-# Quick restart of the Insight Kind cluster after WSL crash / Docker restart.
-# If the cluster exists — restarts it and scales pods back to 1.
-# If the cluster is gone — falls back to full up.sh + init.sh.
+# Quick restart of the Insight stack after WSL crash / Docker restart, or
+# after `dev-down.sh` (which scales replicas to 0). Lightweight alternative
+# to a full `dev-up.sh` re-run when no images need rebuilding.
+#
+# What it does:
+#   1. local mode: ensure the Kind cluster's control-plane container is up.
+#   2. wait for the cluster API server to respond.
+#   3. scale every workload in the `insight` namespace back to replicas=1.
+#   4. ensure CoreDNS still uses public DNS upstream (WSL workaround;
+#      delegates to scripts/dev/patch-coredns-wsl.sh).
+#   5. clean up Airbyte sync pods stuck in Failed/Succeeded.
+#   6. (re-)start the Airbyte port-forward.
+#
+# What it does NOT do:
+#   - re-build Docker images
+#   - re-run `helm upgrade --install` (chart changes — use `dev-up.sh`)
+#   - run `init.sh` (databases, connector registration — use `run-init.sh`)
+#   - recreate the cluster if it's gone (delegates to `dev-up.sh`)
 #
 # Usage:
 #   ./restart.sh                  # default: --env local
-#   ./restart.sh --env virtuozzo  # remote env (just reconnect, no Kind)
+#   ./restart.sh --env virtuozzo  # remote env (just verify connectivity)
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-# ─── Parse --env (same as up.sh) ─────────────────────────────────────────
+# ─── Parse --env ──────────────────────────────────────────────────────────
 ENV_NAME="local"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --env)
-      if [[ -z "${2-}" ]]; then
-        echo "ERROR: --env requires a value (e.g. --env local)" >&2
-        exit 1
-      fi
-      ENV_NAME="$2"
-      shift 2
-      ;;
+      [[ -n "${2-}" ]] || { echo "ERROR: --env requires a value" >&2; exit 1; }
+      ENV_NAME="$2"; shift 2 ;;
     --env=*)
       ENV_NAME="${1#*=}"
-      if [[ -z "$ENV_NAME" ]]; then
-        echo "ERROR: --env= requires a value (e.g. --env=local)" >&2
-        exit 1
-      fi
-      shift
-      ;;
+      [[ -n "$ENV_NAME" ]] || { echo "ERROR: --env= requires a value" >&2; exit 1; }
+      shift ;;
     -h|--help)
       grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'
-      exit 0
-      ;;
+      exit 0 ;;
     *)
       echo "ERROR: unknown argument: $1" >&2
-      exit 1
-      ;;
+      exit 1 ;;
   esac
 done
 
@@ -51,122 +55,83 @@ set -a; source "$ENV_FILE"; set +a
 
 CLUSTER_MODE="${CLUSTER_MODE:-local}"
 CLUSTER_NAME="${CLUSTER_NAME:-insight}"
-NAMESPACE="${NAMESPACE:-insight}"
+NAMESPACE="${INSIGHT_NAMESPACE:-${NAMESPACE:-insight}}"
 
 echo "═══════════════════════════════════════════════════════════════"
 echo "  Insight Platform — Restart"
 echo "  Environment: ${ENV_NAME}   (${CLUSTER_MODE})"
+echo "  Namespace:   ${NAMESPACE}"
 echo "═══════════════════════════════════════════════════════════════"
 
-# ─── Remote mode: just verify connectivity ────────────────────────────────
+# ─── Remote mode: verify connectivity only ────────────────────────────────
 if [[ "$CLUSTER_MODE" != "local" ]]; then
   echo "Remote cluster — verifying connectivity..."
-  kubectl cluster-info --request-timeout=15s || { echo "ERROR: cannot reach cluster" >&2; exit 1; }
-  echo "Cluster reachable. Run ./up.sh --env $ENV_NAME to redeploy."
+  kubectl cluster-info --request-timeout=15s \
+    || { echo "ERROR: cannot reach cluster" >&2; exit 1; }
+  echo "Cluster reachable. Run ./dev-up.sh --env $ENV_NAME to redeploy."
   exit 0
 fi
 
-# ─── Local mode: Kind cluster ────────────────────────────────────────────
+# ─── Local Kind: bring the cluster back ──────────────────────────────────
 command -v kind &>/dev/null || { echo "ERROR: kind required" >&2; exit 1; }
 KUBECONFIG_PATH="${KUBECONFIG:-${HOME}/.kube/insight.kubeconfig}"
 
-# Clean up ghost containers from crashed sessions
-echo "=== Cleaning up stale containers ==="
+# Clean up exited Kind containers
 for c in $(docker ps -a --filter "status=exited" --filter "name=kind" --format '{{.Names}}' 2>/dev/null); do
   echo "  Removing dead container: $c"
   docker rm -f "$c" 2>/dev/null || true
 done
 
-# Check if cluster exists
-if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
-  echo "=== Restarting Kind cluster '${CLUSTER_NAME}' ==="
-  docker start "${CLUSTER_NAME}-control-plane" 2>/dev/null || true
-  sleep 5
-
-  kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${KUBECONFIG_PATH}" 2>/dev/null || true
-  export KUBECONFIG="${KUBECONFIG_PATH}"
-
-  echo "  Waiting for API server..."
-  if kubectl cluster-info --request-timeout=30s &>/dev/null; then
-    echo "  Cluster is up. Scaling services back..."
-
-    # Ingestion
-    kubectl scale deployment/clickhouse -n data --replicas=1 2>/dev/null || true
-    kubectl scale deployment -n argo --all --replicas=1 2>/dev/null || true
-    kubectl scale statefulset -n airbyte --all --replicas=1 2>/dev/null || true
-    kubectl scale deployment -n airbyte --all --replicas=1 2>/dev/null || true
-
-    # App infra (MariaDB is a StatefulSet)
-    kubectl scale statefulset -n "$NAMESPACE" --all --replicas=1 2>/dev/null || true
-    kubectl scale deployment -n "$NAMESPACE" --all --replicas=1 2>/dev/null || true
-
-    echo "  Waiting for key pods..."
-    kubectl wait --for=condition=ready pod -l app=clickhouse -n data --timeout=120s 2>/dev/null \
-      || echo "  WARNING: ClickHouse not ready"
-    kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argo-workflows-server -n argo --timeout=120s 2>/dev/null \
-      || echo "  WARNING: Argo not ready"
-    kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=mariadb -n "$NAMESPACE" --timeout=120s 2>/dev/null \
-      || echo "  WARNING: MariaDB not ready"
-
-    # Clean up stale replication-job pods (Airbyte sync pods that didn't finish cleanly).
-    # Scoped to terminal phases only -- phase!=Running would also match Pending
-    # and ContainerCreating, killing freshly rescheduled workloads.
-    for phase in Failed Succeeded; do
-      kubectl delete pod -n airbyte --field-selector="status.phase=$phase" --force 2>/dev/null || true
-    done
-
-    # Ensure CoreDNS is patched (public DNS upstream — survives Kind restart normally,
-    # but guard against manual edits / cluster-wide reset).
-    if kubectl get configmap coredns -n kube-system -o yaml 2>/dev/null \
-      | grep -q "forward . /etc/resolv.conf"; then
-      echo "  Patching CoreDNS to use public DNS (8.8.8.8, 8.8.4.4)..."
-      kubectl get configmap coredns -n kube-system -o yaml \
-        | sed 's|forward \. /etc/resolv.conf|forward . 8.8.8.8 8.8.4.4|' \
-        | kubectl apply -f - >/dev/null
-      kubectl rollout restart deployment/coredns -n kube-system >/dev/null
-    fi
-
-    # Clean up stuck helm releases
-    for ns_release in "airbyte:airbyte" "argo:argo-workflows"; do
-      ns="${ns_release%%:*}"
-      release="${ns_release##*:}"
-      status=$(helm status "$release" -n "$ns" -o json 2>/dev/null \
-        | python3 -c "import sys,json; print(json.load(sys.stdin).get('info',{}).get('status',''))" 2>/dev/null || true)
-      if [[ "$status" == pending-* ]]; then
-        echo "  Cleaning stuck helm release: $release ($status)"
-        helm uninstall "$release" -n "$ns" --no-hooks 2>/dev/null || true
-      fi
-    done
-
-    # Airbyte port-forward
-    pkill -f 'port-forward.*airbyte' 2>/dev/null || true
-    nohup kubectl -n airbyte port-forward svc/airbyte-airbyte-server-svc 8001:8001 >/dev/null 2>&1 &
-    disown
-
-    echo ""
-    echo "=== Restart complete ==="
-    echo "  KUBECONFIG: ${KUBECONFIG}"
-    echo "  Frontend:   http://localhost:${INGRESS_HTTP_PORT:-8000}"
-    echo "  API:        http://localhost:${INGRESS_HTTP_PORT:-8000}/api"
-    echo "  Airbyte:    http://localhost:8001"
-    echo "  Argo UI:    http://localhost:30500"
-    echo "  ClickHouse: http://localhost:30123"
-    exit 0
-  fi
-
-  echo "  Cluster not responding — will recreate."
-  kind delete cluster --name "${CLUSTER_NAME}"
+if ! kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+  echo "Cluster '${CLUSTER_NAME}' not found — falling back to ./dev-up.sh"
+  exec "$ROOT_DIR/dev-up.sh" --env "$ENV_NAME"
 fi
 
-# ─── Cluster gone — full setup ───────────────────────────────────────────
-echo "=== Cluster not found — running full up.sh ==="
-"$ROOT_DIR/up.sh" --env "$ENV_NAME"
+echo "=== Restarting Kind cluster '${CLUSTER_NAME}' ==="
+docker start "${CLUSTER_NAME}-control-plane" >/dev/null 2>&1 || true
 
-# Run init if up.sh created a new cluster
-if [[ -f "$ROOT_DIR/src/ingestion/run-init.sh" ]]; then
-  echo ""
-  echo "=== Running init (databases, connectors, connections)... ==="
-  cd "$ROOT_DIR/src/ingestion"
-  ./secrets/apply.sh 2>/dev/null || true
-  ./run-init.sh
+kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${KUBECONFIG_PATH}" 2>/dev/null || true
+export KUBECONFIG="${KUBECONFIG_PATH}"
+
+echo "  Waiting for control-plane node Ready..."
+if ! kubectl wait --for=condition=Ready node --all --timeout=60s &>/dev/null; then
+  echo "  Cluster did not become Ready in 60s — falling back to ./dev-up.sh"
+  exec "$ROOT_DIR/dev-up.sh" --env "$ENV_NAME"
 fi
+
+echo "  API server reachable. Scaling '${NAMESPACE}' workloads back to replicas=1..."
+kubectl scale statefulset -n "$NAMESPACE" --all --replicas=1 2>/dev/null || true
+kubectl scale deployment  -n "$NAMESPACE" --all --replicas=1 2>/dev/null || true
+
+echo "  Waiting for key infra pods..."
+kubectl wait --for=condition=ready pod \
+  -l app.kubernetes.io/name=mariadb     -n "$NAMESPACE" --timeout=120s 2>/dev/null \
+  || echo "  WARNING: MariaDB not ready"
+kubectl wait --for=condition=ready pod \
+  -l app.kubernetes.io/name=clickhouse  -n "$NAMESPACE" --timeout=120s 2>/dev/null \
+  || echo "  WARNING: ClickHouse not ready"
+kubectl wait --for=condition=ready pod \
+  -l app.kubernetes.io/name=redis       -n "$NAMESPACE" --timeout=120s 2>/dev/null \
+  || echo "  WARNING: Redis not ready"
+
+# Reapply CoreDNS WSL workaround (idempotent — no-op if already patched).
+"$ROOT_DIR/scripts/dev/patch-coredns-wsl.sh"
+
+# Clean up stale Airbyte replication-job pods (terminal phases only —
+# phase!=Running would also match Pending and ContainerCreating).
+for phase in Failed Succeeded; do
+  kubectl delete pod -n "$NAMESPACE" --field-selector="status.phase=$phase" --force 2>/dev/null || true
+done
+
+# (Re-)start Airbyte port-forward in the background.
+pkill -f 'port-forward.*airbyte' 2>/dev/null || true
+nohup kubectl -n "$NAMESPACE" port-forward svc/airbyte-airbyte-server-svc 8001:8001 \
+  >/dev/null 2>&1 &
+disown
+
+echo ""
+echo "=== Restart complete ==="
+echo "  KUBECONFIG: ${KUBECONFIG}"
+echo "  Frontend:   http://localhost:${INGRESS_HTTP_PORT:-8000}"
+echo "  API:        http://localhost:${INGRESS_HTTP_PORT:-8000}/api"
+echo "  Airbyte:    http://localhost:8001"

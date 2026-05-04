@@ -13,7 +13,7 @@
 -- Raw SQL equivalents of dbt models:
 --   seed_persons_from_claude_admin.sql
 --   seed_aliases_from_claude_admin.sql
---   seed_identity_input_from_claude_admin.sql
+--   seed_identity_inputs_from_claude_admin.sql
 -- ============================================================
 
 -- TEMPORARY: insight_tenant_id derived via sipHash128 until tenants table exists.
