@@ -9,15 +9,25 @@ TENANT="${2:?Usage: $0 <connector> <tenant_id>}"
 
 export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/insight.kubeconfig}"
 export TOOLKIT_DIR="${SCRIPT_DIR}/airbyte-toolkit"
-source "${TOOLKIT_DIR}/lib/state.sh"
 
-# Read connection_id from state — iterate source_ids under the connector
-CONNECTION_ID=""
-for source_key in $(state_list "tenants.${TENANT}.connectors.${CONNECTOR}"); do
-  CONNECTION_ID=$(state_get "tenants.${TENANT}.connectors.${CONNECTOR}.${source_key}.connection_id")
-  [[ -n "$CONNECTION_ID" ]] && break
-done
-[[ -n "$CONNECTION_ID" ]] || { echo "ERROR: no connection_id for connector '$CONNECTOR' tenant '$TENANT'. Run update-connections.sh first." >&2; exit 1; }
+# Resolve connection_id from Airbyte (Airbyte is now the authoritative
+# state — no local state.yaml). Match by connection.name prefix
+# `${CONNECTOR}-…-${TENANT}` written by reconcile-connectors.sh.
+# shellcheck source=airbyte-toolkit/lib/airbyte.sh
+source "${TOOLKIT_DIR}/lib/airbyte.sh"
+WORKSPACE_ID="$(ab_workspace_id)"
+CONNECTION_ID="$(ab_list_connections "${WORKSPACE_ID}" \
+  | python3 -c '
+import sys, json
+connector, tenant = sys.argv[1], sys.argv[2]
+for c in json.load(sys.stdin):
+    name = c.get("name", "")
+    if name.startswith(f"{connector}-") and name.endswith(f"-{tenant}-conn"):
+        print(c.get("connectionId", "")); break
+    if name.startswith(f"{connector}-") and tenant in name:
+        print(c.get("connectionId", "")); break
+' "${CONNECTOR}" "${TENANT}")"
+[[ -n "$CONNECTION_ID" ]] || { echo "ERROR: no connection_id for connector '$CONNECTOR' tenant '$TENANT'. Run reconcile-connectors.sh first." >&2; exit 1; }
 
 # Find descriptor by connector name — try exact match, then prefix match
 DBT_SELECT=$(python3 -c "
