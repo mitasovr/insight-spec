@@ -1,3 +1,4 @@
+-- depends_on: {{ ref('bamboohr__bronze_promoted') }}
 -- Bronze → Silver step 1: BambooHR Employees → class_people
 -- Full-refresh source. Maps employee records to unified person registry.
 -- SCD Type 2: valid_from = lastChanged, valid_to = NULL (current-state snapshot).
